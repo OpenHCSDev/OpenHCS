@@ -14,7 +14,7 @@ The Lean formalization establishes:
 \item \textbf{Economic theorems:} Simplicity Tax redistribution identities and hardness distribution results.
 \end{enumerate}
 
-\textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow from informal composition with standard results (TAUTOLOGY is coNP-complete, etc.). The Lean proofs verify the reduction constructions; the complexity class membership is derived by combining these with established theorems from complexity theory.
+\textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
 
 \subsection{Polynomial-Time Reduction Definition}
 
@@ -110,9 +110,6 @@ Lean identifiers retain internal naming (\texttt{intrinsicDOF}, \texttt{simplici
 \nolinkurl{cor:no-auto-minimize} & Full (conditional) &
 \nolinkurl{ClaimClosure.no_auto_minimize_of_p_neq_conp} &
 Mechanized conditional closure: non-collapse plus collapse-implication yields impossibility. \\
-\nolinkurl{cor:overmodel-diagnostic} & Full &
-\nolinkurl{ClaimClosure.no_exact_identifier_implies_not_boundary_characterized}, \nolinkurl{ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset}, \nolinkurl{ConfigReduction.config_sufficiency_iff_behavior_preserving} &
-Contrapositive diagnostic step is mechanized in the Boolean model with explicit boundary predicate. \\
 \nolinkurl{cor:overmodel-diagnostic-implication} & Full &
 \nolinkurl{Sigma2PHardness.sufficient_iff_relevant_subset} & Contrapositive of mechanized theorem. \\
 \nolinkurl{cor:practice-bounded} & Full &

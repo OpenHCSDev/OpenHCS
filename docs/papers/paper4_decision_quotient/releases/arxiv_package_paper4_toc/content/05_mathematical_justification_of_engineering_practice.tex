@@ -19,7 +19,7 @@ All claims in this section are formal corollaries under the declared model assum
 
 Real engineering problems reduce directly to the decision problems studied in this paper.
 
-\begin{theorem}[[C1--C4] Configuration Simplification Reduces to SUFFICIENCY-CHECK]
+\begin{theorem}[C1--C4: Configuration Simplification Reduces to SUFFICIENCY-CHECK]
 \label{thm:config-reduction}
 Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK.
 \textit{(Lean: \nolinkurl{ConfigReduction.config_sufficiency_iff_behavior_preserving})}
@@ -65,9 +65,8 @@ The reduction above requires only:
 These are exactly the model-contract premises C1--C3 instantiated for configuration systems.
 \end{remark}
 
-\begin{theorem}[[S] Over-Modeling as Boundary-Signal Corollary]
+\begin{theorem}[S: Over-Modeling as Boundary-Signal Corollary]
 \label{thm:overmodel-diagnostic}
-\label{cor:overmodel-diagnostic}
 By contraposition of Theorem~\ref{thm:config-reduction}, if no coordinate set can be certified as exactly relevance-identifying (Definition~\ref{def:exact-identifiability}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization.
 \textit{(Lean model-level contrapositive: \nolinkurl{ClaimClosure.no_exact_identifier_implies_not_boundary_characterized},
 \nolinkurl{ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset})}
@@ -81,7 +80,7 @@ Assume the decision boundary were completely characterized by the current parame
 
 We now prove a cost asymmetry result under the stated cost model and complexity constraints.\footnote{Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.}
 
-\begin{theorem}[[S+ETH] Cost-Asymmetry Consequence]
+\begin{theorem}[S+ETH: Cost-Asymmetry Consequence]
 \label{thm:cost-asymmetry-eth}
 Consider an engineer specifying a system configuration with $n$ parameters. Let:
 \begin{itemize}

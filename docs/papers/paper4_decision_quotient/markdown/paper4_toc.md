@@ -12,7 +12,7 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **General case:** SUFFICIENCY-CHECK is -complete; ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete.
 
--   **Tractable cases:** Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($u = f + g$) under any encoding; and tree-structured utility with explicit local factors.
+-   **Tractable cases:** Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($U = f + g$) under any encoding; and tree-structured utility with explicit local factors.
 
 -   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
@@ -49,7 +49,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 1.  **Bounded actions** ($|A| \leq k$) under explicit-state encoding: with constantly many actions, we enumerate action pairs over the explicit utility table.
 
-2.  **Separable utility** ($u(a,s) = f(a) + g(s)$): The optimal action depends only on $f$, making all coordinates irrelevant to the decision.
+2.  **Separable utility** ($U(a,s) = f(a) + g(s)$): The optimal action depends only on $f$, making all coordinates irrelevant to the decision.
 
 3.  **Tree-structured utility**: With explicit local factors over a tree, dynamic programming yields polynomial algorithms in the input length.
 
@@ -635,7 +635,7 @@ All claims in this section are formal corollaries under the declared model assum
 Real engineering problems reduce directly to the decision problems studied in this paper.
 
 ::: theorem
-Configuration Simplification Reduces to SUFFICIENCY-CHECK\] []{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK. *(Lean: `ConfigReduction.config_sufficiency_iff_behavior_preserving`)*
+[]{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK. *(Lean: `ConfigReduction.config_sufficiency_iff_behavior_preserving`)*
 :::
 
 ::: proof
@@ -677,7 +677,7 @@ These are exactly the model-contract premises C1--C3 instantiated for configurat
 :::
 
 ::: theorem
-Over-Modeling as Boundary-Signal Corollary\] []{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} []{#cor:overmodel-diagnostic label="cor:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if no coordinate set can be certified as exactly relevance-identifying (Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization. *(Lean model-level contrapositive: `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`)*
+[]{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if no coordinate set can be certified as exactly relevance-identifying (Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization. *(Lean model-level contrapositive: `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`)*
 :::
 
 ::: proof
@@ -689,7 +689,7 @@ Over-Modeling as Boundary-Signal Corollary\] []{#thm:overmodel-diagnostic label=
 We now prove a cost asymmetry result under the stated cost model and complexity constraints.[^1]
 
 ::: theorem
-Cost-Asymmetry Consequence\] []{#thm:cost-asymmetry-eth label="thm:cost-asymmetry-eth"} Consider an engineer specifying a system configuration with $n$ parameters. Let:
+[]{#thm:cost-asymmetry-eth label="thm:cost-asymmetry-eth"} Consider an engineer specifying a system configuration with $n$ parameters. Let:
 
 -   $C_{\text{over}}(k)$ = cost of maintaining $k$ extra parameters beyond minimal
 
@@ -940,7 +940,7 @@ H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathr
 The table is schematic; the formal statement is Corollary [\[cor:type-system-threshold\]](#cor:type-system-threshold){reference-type="ref" reference="cor:type-system-threshold"}.
 
 ::: corollary
-[]{#cor:type-system-threshold label="cor:type-system-threshold"} For the formal native-vs-manual architecture instance, native support has lower total realized cost for all $$n > H_{\mathrm{baseline}}(P),$$ where $H_{\mathrm{baseline}}(P)\equiv \mathrm{intrinsicDOF}(P)$ in the Lean model `HardnessDistribution`. *(Lean: `HardnessDistribution.native_dominates_manual`)*
+[]{#cor:type-system-threshold label="cor:type-system-threshold"} For the formal native-vs-manual architecture instance, native support has lower total realized cost for all $$n > H_{\mathrm{baseline}}(P),$$ where $H_{\mathrm{baseline}}(P)$ corresponds to the Lean identifier `intrinsicDOF`(P) in module `HardnessDistribution`. *(Lean: `HardnessDistribution.native_dominates_manual`)*
 :::
 
 ::: proof
@@ -1100,7 +1100,7 @@ The complexity of decision-making has been studied extensively. Papadimitriou [
 
 #### Closest prior work and novelty.
 
-Closest to our contribution is the feature-selection/model-selection hardness literature, which proves NP-hardness and inapproximability for predictive subset selection [@blum1997selection; @amaldi1998complexity]. Our contribution is stronger on two axes those works do not provide: (i) machine-checked reductions (TAUTOLOGY and $\exists\forall$-SAT mappings with explicit polynomial bounds), and (ii) a complete hardness/tractability landscape for decision relevance under explicit encoding assumptions. We study decision relevance rather than predictive compression, and we formalize the core reductions in Lean 4 rather than leaving them only on paper.
+Closest to our contribution is the feature-selection/model-selection hardness literature, which proves NP-hardness and inapproximability for predictive subset selection [@blum1997selection; @amaldi1998complexity]. Our contribution is stronger on two axes not provided by those works: (i) machine-checked reductions (TAUTOLOGY and $\exists\forall$-SAT mappings with explicit polynomial bounds), and (ii) a complete hardness/tractability landscape for decision relevance under explicit encoding assumptions. We study decision relevance rather than predictive compression, and we formalize the core reductions in Lean 4 rather than leaving them only on paper.
 
 ## Feature Selection
 
@@ -1225,7 +1225,7 @@ The Lean formalization establishes:
 
 3.  **Economic theorems:** Simplicity Tax redistribution identities and hardness distribution results.
 
-**Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow from informal composition with standard results (TAUTOLOGY is coNP-complete, etc.). The Lean proofs verify the reduction constructions; the complexity class membership is derived by combining these with established theorems from complexity theory.
+**Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
 
 ## Polynomial-Time Reduction Definition
 
@@ -1307,8 +1307,6 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
   `cor:linear-positive-no-saturation`         Full                 `HardnessDistribution.no_positive_slope_linear_represents_saturating`                                                                                                                                                                                                                                                                                  Direct theorem mapping.
 
   `cor:no-auto-minimize`                      Full (conditional)   `ClaimClosure.no_auto_minimize_of_p_neq_conp`                                                                                                                                                                                                                                                                                                          Mechanized conditional closure: non-collapse plus collapse-implication yields impossibility.
-
-  `cor:overmodel-diagnostic`                  Full                 `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`, `ConfigReduction.config_sufficiency_iff_behavior_preserving`                                                                                                                                                 Contrapositive diagnostic step is mechanized in the Boolean model with explicit boundary predicate.
 
   `cor:overmodel-diagnostic-implication`      Full                 `Sigma2PHardness.sufficient_iff_relevant_subset`                                                                                                                                                                                                                                                                                                       Contrapositive of mechanized theorem.
 
