@@ -230,19 +230,19 @@ In that instantiation, each value is characterized by:
 
 -   **Lineage axis ($B$)**: The provenance chain of the value's class (which classes it derives from, in what order)[^1]
 
--   **Profile axis ($S$)**: The observable interface (which attributes/methods the value provides)
+-   **Profile axis ($S$)**: The observable attribute profile (interfaces/method signatures in the PL instantiation)
 
 ::: definition
 A value $v \in \mathcal{V}$ has representation $(B(v), S(v))$ where: $$\begin{aligned}
 B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
-S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
+S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(attribute profile)}
 \end{aligned}$$ The lineage axis captures *nominal* identity: where the class comes from. The profile axis captures *structural* identity: what the value can do.
 
 In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/MRO output). Any implementation-specific normalization or lookup machinery is auxiliary and does not define inheritance (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}).
 :::
 
 ::: theorem
-[]{#thm:model-completeness label="thm:model-completeness"} Let a fixed-axis domain be specified by an axis map $\alpha: \mathcal{V} \to \mathcal{A}$ and an observation interface $\Phi$ such that each primitive query $q \in \Phi$ factors through $\alpha$. Then every in-scope semantic property (i.e., any property computable by an admissible $\Phi$-only strategy) factors through $\alpha$: there exists $\tilde{P}$ with $$P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.$$
+[]{#thm:model-completeness label="thm:model-completeness"} Let a fixed-axis domain be specified by an axis map $\alpha: \mathcal{V} \to \mathcal{A}$ and an observation family $\Phi$ such that each primitive query $q \in \Phi$ factors through $\alpha$. Then every in-scope semantic property (i.e., any property computable by an admissible $\Phi$-only strategy) factors through $\alpha$: there exists $\tilde{P}$ with $$P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.$$
 :::
 
 In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic properties are functions of $(B,S)$.
@@ -251,20 +251,24 @@ In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic proper
 *Proof.* An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript, and hence any strategy's output, depends only on $\alpha(v)$, so the computed property factors through $\alpha$. ◻
 :::
 
-## Interface Equivalence and Observational Limits
+::: corollary
+[]{#cor:fixed-axis-incompleteness label="cor:fixed-axis-incompleteness"} Any fixed-axis classification system is complete only for properties measurable on the fixed axis map $\alpha$, and incomplete for any property that varies within an $\alpha$-fiber. Equivalently, if $\alpha(v)=\alpha(w)$ but $P(v)\neq P(w)$, then no admissible $\Phi$-only strategy can compute $P$ with zero error.
+:::
 
-Recall from Section 1 the interface equivalence relation:
+## Attribute Equivalence and Observational Limits
+
+Recall from Section 1 the attribute equivalence relation:
 
 ::: definition
-Values $v, w \in \mathcal{V}$ are interface-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$, i.e., they satisfy exactly the same interfaces.
+Values $v, w \in \mathcal{V}$ are attribute-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$, i.e., they induce exactly the same attribute responses.
 :::
 
 ::: proposition
-The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mathcal{V}/{\sim}$ denote the quotient space. An interface-only observer effectively operates on $\mathcal{V}/{\sim}$, not $\mathcal{V}$.
+The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mathcal{V}/{\sim}$ denote the quotient space. An attribute-only observer effectively operates on $\mathcal{V}/{\sim}$, not $\mathcal{V}$.
 :::
 
 ::: corollary
-The information lost by interface-only observation is: $$H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)$$ where $H$ denotes entropy. This quantity is positive whenever multiple classes share the same interface profile.
+The information lost by attribute-only observation is: $$H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)$$ where $H$ denotes entropy. This quantity is positive whenever multiple classes share the same attribute profile.
 :::
 
 ## Identification Capacity {#sec:identification-capacity}
@@ -333,9 +337,9 @@ Witness cost is a form of query complexity [@buhrman2002complexity] specialized 
 ::: lemma
 For any property $P$:
 
-1.  If $P$ is interface-computable: $W(P) \leq |\mathcal{I}|$
+1.  If $P$ is attribute-computable: $W(P) \leq |\mathcal{I}|$
 
-2.  If $P$ varies within some $\sim$-class: $W(P) = \infty$ for interface-only observers
+2.  If $P$ varies within some $\sim$-class: $W(P) = \infty$ for attribute-only observers
 
 3.  With nominal-tag access: $W(\text{class-identity}) = O(1)$
 :::
@@ -345,7 +349,7 @@ For any property $P$:
 We now define the three-dimensional tradeoff space that characterizes observation strategies, using information-theoretic units.
 
 ::: definition
-For a set of class identifiers (tags) $\mathcal{T}$ with $|\mathcal{T}| = k$, the *tag rate* $L$ is the minimum number of bits required to encode a class identifier: $$L \geq \log_2 k \quad \text{bits per value}$$ For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For interface-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over classes, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem [@shannon1959coding].
+For a set of class identifiers (tags) $\mathcal{T}$ with $|\mathcal{T}| = k$, the *tag rate* $L$ is the minimum number of bits required to encode a class identifier: $$L \geq \log_2 k \quad \text{bits per value}$$ For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For attribute-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over classes, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem [@shannon1959coding].
 :::
 
 ::: definition
@@ -447,7 +451,7 @@ Consider a classification system with $k = 1000$ classes, each characterized by 
   Duck typing (query all)                     $0$                    $\leq 50$ queries
   Adaptive duck typing                        $0$                    $\geq d$ queries
 
-  : Identification strategies for 1000 classes with 50 methods.
+  : Identification strategies for 1000 classes with 50 attributes.
 :::
 
 Here $d$ is the distinguishing dimension, the size of any minimal distinguishing query set. For typical hierarchies, $d \approx 5$--$15$. The gap between 10 bits of storage vs. 5--50 queries per identification is the cost of forgoing nominal tagging.
@@ -474,11 +478,11 @@ Let $E(\mathcal{O})$ be the number of locations that must be inspected to find a
 :::
 
 ::: theorem
-[]{#thm:declared-localization label="thm:declared-localization"} $E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+[]{#thm:declared-localization label="thm:declared-localization"} $E(\text{attribute-only, declared}) = O(k)$ where $k$ = number of entity classes.
 :::
 
 ::: proof
-*Proof.* With declared interfaces, the constraint "$v$ must satisfy interface $I$" requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations. ◻
+*Proof.* With declared attribute sets (interfaces in the PL instantiation), the constraint "$v$ must satisfy attribute $I$" requires verifying that each class satisfies all attributes in $I$. For $k$ classes, $O(k)$ locations. ◻
 :::
 
 ::: theorem
@@ -522,7 +526,7 @@ Let $I(\mathcal{O}, c)$ be the set of locations where constraint $c$ is encoded 
 
 ## Model Contract (Fixed-Axis Domains)
 
-Model contract (fixed-axis domain). A domain is specified by a fixed observation interface $\Phi$ derived from a fixed axis map $\alpha: \mathcal{V} \to \mathcal{A}$ (e.g., $\alpha(v) = (B(v), S(v))$). An observer is permitted to interact with $v$ only through primitive queries in $\Phi$, and each primitive query factors through $\alpha$: for every $q \in \Phi$, there exists $\tilde{q}$ such that $q(v) = \tilde{q}(\alpha(v))$. A property is in-scope semantic iff it is computable by an admissible strategy that uses only responses to queries in $\Phi$ (under our admissibility constraints: no global preprocessing tables, no amortized caching, etc.).
+Model contract (fixed-axis domain). A domain is specified by a fixed observation family $\Phi$ derived from a fixed axis map $\alpha: \mathcal{V} \to \mathcal{A}$ (e.g., $\alpha(v) = (B(v), S(v))$). An observer is permitted to interact with $v$ only through primitive queries in $\Phi$, and each primitive query factors through $\alpha$: for every $q \in \Phi$, there exists $\tilde{q}$ such that $q(v) = \tilde{q}(\alpha(v))$. A property is in-scope semantic iff it is computable by an admissible strategy that uses only responses to queries in $\Phi$ (under our admissibility constraints: no global preprocessing tables, no amortized caching, etc.).
 
 We adopt $\Phi$ as the complete observation universe for this paper: to claim applicability to a concrete runtime one must either (i) exhibit mappings from each runtime observable into $\Phi$, or (ii) enforce the admissibility constraints (no external registries, no reflection, no preprocessing/amortization). Under either condition the theorems apply without qualification.
 
@@ -539,10 +543,10 @@ If two values $v, w$ satisfy $\alpha(v) = \alpha(w)$, then no admissible $\Phi$-
 The classification problem is: given a set of queries, which subsets suffice to distinguish all entities?
 
 ::: definition
-Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with interface set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies interface $I$.
+Let $\mathcal{Q}$ be the set of all primitive queries available to an observer. For a classification system with attribute set $\mathcal{I}$, we have $\mathcal{Q} = \{q_I : I \in \mathcal{I}\}$ where $q_I(v) = 1$ iff $v$ satisfies attribute $I$.
 :::
 
-In this section, "queries" are the primitive interface predicates $q \in \Phi$ (equivalently, each $q$ factors through the axis map: $q = \tilde{q} \circ \alpha$). See the Convention above where $\Phi := \mathcal{Q}$.
+In this section, "queries" are the primitive attribute predicates $q \in \Phi$ (equivalently, each $q$ factors through the axis map: $q = \tilde{q} \circ \alpha$). See the Convention above where $\Phi := \mathcal{Q}$.
 
 **Convention:** $\Phi := \mathcal{Q}$. All universal quantification over "queries" ranges over $q \in \Phi$ only.
 
@@ -558,16 +562,16 @@ A distinguishing set $S$ is *minimal* if no proper subset of $S$ is distinguishi
 
 **Scope and assumptions.** The matroid theorem below is unconditional within the fixed-axis observational theory defined above. In this section, "query" always means a primitive predicate $q \in \Phi$ (equivalently, $q$ factors through $\alpha$ as in the Model Contract). It depends only on:
 
--   $E = \Phi$ is the ground set of primitive queries (interface predicates).
+-   $E = \Phi$ is the ground set of primitive queries (attribute predicates).
 
 -   "Distinguishing": for all values $v,w$ with $\text{class}(v) \neq \text{class}(w)$, there exists $q \in S$ such that $q(v) \neq q(w)$ (Def. above).
 
 -   "Minimal" means inclusion-minimal: no proper subset suffices.
 
-No further assumptions are required within this theory (i.e., beyond the fixed interface $\Phi$ already specified). The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
+No further assumptions are required within this theory (i.e., beyond the fixed observation family $\Phi$ already specified). The proof constructs a closure operator satisfying extensivity, monotonicity, and idempotence, from which basis exchange follows (see Lean formalization).
 
 ::: definition
-Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (interface predicates). Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
+Let $E = \Phi\;(=\mathcal{Q})$ be the ground set of primitive queries (attribute predicates). Let $\mathcal{B} \subseteq 2^E$ be the family of minimal distinguishing sets.
 :::
 
 ::: lemma
@@ -599,7 +603,7 @@ $\mathcal{B}$ is the set of bases of a matroid on ground set $E$.
 :::
 
 ::: remark
-Let $n := |\mathcal{I}|$ be the ambient number of available attributes (interfaces). Clearly $d \le n$, and there exist worst-case families with $d = n$.
+Let $n := |\mathcal{I}|$ be the ambient number of available attributes. Clearly $d \le n$, and there exist worst-case families with $d = n$.
 :::
 
 ::: corollary
@@ -609,14 +613,14 @@ All minimal distinguishing sets have equal cardinality. Thus the distinguishing 
 ## Implications for Witness Cost
 
 ::: corollary
-For any interface-only observer, $W(\text{class-identity}) \geq d$ where $d$ is the distinguishing dimension.
+For any attribute-only observer, $W(\text{class-identity}) \geq d$ where $d$ is the distinguishing dimension.
 :::
 
 ::: proof
 *Proof.* If a procedure queried fewer than $d$ attributes on every execution path, each such queried set would be non-distinguishing by definition of $d$. For that path, there would exist two different classes with identical answers on all queried attributes, yielding identical transcripts and forcing the same output on both values. This contradicts zero-error class identification. Hence some path requires at least $d$ queries. ◻
 :::
 
-The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and interface-only observers lies in *witness cost*: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
+The key insight: the distinguishing dimension is invariant across all minimal query strategies. The difference between nominal-tag and attribute-only observers lies in *witness cost*: a nominal tag achieves $W = O(1)$ by storing the identity directly, bypassing query enumeration.
 
 
 ## Witness Cost for Class Identity
@@ -628,7 +632,7 @@ Nominal-tag observers achieve the minimum witness cost for class identity: $$W_{
 
 Specifically, the witness is a single tag read: compare $\text{tag}(v_1) = \text{tag}(v_2)$.
 
-Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the distinguishing dimension (and $d \le n$, with worst-case $d = n$).
+Attribute-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the distinguishing dimension (and $d \le n$, with worst-case $d = n$).
 :::
 
 ::: proof
@@ -636,9 +640,9 @@ Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the di
 
 1.  Nominal-tag access is a single primitive query
 
-2.  Interface-only observers must query at least $d$ interfaces in the worst case (a generic strategy queries all $n$)
+2.  Attribute-only observers must query at least $d$ attributes in the worst case (a generic strategy queries all $n$)
 
-3.  No shorter witness exists for interface-only observers (by the information barrier)
+3.  No shorter witness exists for attribute-only observers (by the information barrier)
 
  ◻
 :::
@@ -648,7 +652,7 @@ Interface-only observers require $W_{\text{eq}} = \Omega(d)$ where $d$ is the di
   **Observer Class**      **Witness Procedure**      **Witness Cost $W$**
   -------------------- ---------------------------- ----------------------
   Nominal-tag                Single tag read                $O(1)$
-  Interface-only        Query a distinguishing set       $\Omega(d)$
+  Attribute-only        Query a distinguishing set       $\Omega(d)$
 
   : Witness cost for class identity by observer class.
 
@@ -668,11 +672,11 @@ Recall from Section 2 that observer strategies are characterized by three dimens
 We compare two observer classes:
 
 ::: definition
-An observer that queries only interface membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit class tags.
+An observer that queries only attribute membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit class tags.
 :::
 
 ::: definition
-An observer that may read a single class identifier (nominal tag) per value, in addition to interface queries.
+An observer that may read a single class identifier (nominal tag) per value, in addition to attribute queries.
 :::
 
 ::: theorem
@@ -690,7 +694,7 @@ An observer that may read a single class identifier (nominal tag) per value, in 
 
 3.  In general (non-maximal) domains, nominal tagging remains Pareto-optimal at $D=0$ but need not be unique: partial tags can coexist on the frontier.
 
-In information-barrier domains, interface-only observers (the $L=0$ face) satisfy:
+In information-barrier domains, attribute-only observers (the $L=0$ face) satisfy:
 
 -   **Tag length**: $L = 0$ bits (no explicit tag)
 
@@ -721,19 +725,19 @@ The three-dimensional frontier shows:
 
 -   In maximal-barrier domains, the unique $D=0$ Pareto point is nominal tagging at $L=\lceil \log_2 k\rceil$.
 
--   In general domains, interface-only observers trade tag length for distortion on the $L=0$ face when collisions are present.
+-   In general domains, attribute-only observers trade tag length for distortion on the $L=0$ face when collisions are present.
 
 Figure [1](#fig:lwd-tradeoff){reference-type="ref" reference="fig:lwd-tradeoff"} visualizes the $(L, W, D)$ tradeoff space. The key observation is the ambiguity converse: the minimum zero-error tag rate is $\log_2 A_\pi$, with the maximal-barrier special case $\log_2 k$.
 
 <figure id="fig:lwd-tradeoff">
 
-<figcaption>Schematic illustration of the <span class="math inline">(<em>L</em>, <em>W</em>, <em>D</em>)</span> tradeoff. For a concrete example with <span class="math inline"><em>k</em> = 1000</span> classes, distinguishing dimension <span class="math inline"><em>d</em> = 10</span>, and maximal barrier (<span class="math inline"><em>A</em><sub><em>π</em></sub> = <em>k</em></span>), the nominal-tag strategy achieves <span class="math inline"><em>L</em> = 10</span> bits, <span class="math inline"><em>W</em> = <em>O</em>(1)</span>, <span class="math inline"><em>D</em> = 0</span>, while the interface-only strategy requires <span class="math inline"><em>W</em> = 10</span> queries and incurs <span class="math inline"><em>D</em> &gt; 0</span> due to collisions.</figcaption>
+<figcaption>Schematic illustration of the <span class="math inline">(<em>L</em>, <em>W</em>, <em>D</em>)</span> tradeoff. For a concrete example with <span class="math inline"><em>k</em> = 1000</span> classes, distinguishing dimension <span class="math inline"><em>d</em> = 10</span>, and maximal barrier (<span class="math inline"><em>A</em><sub><em>π</em></sub> = <em>k</em></span>), the nominal-tag strategy achieves <span class="math inline"><em>L</em> = 10</span> bits, <span class="math inline"><em>W</em> = <em>O</em>(1)</span>, <span class="math inline"><em>D</em> = 0</span>, while the attribute-only strategy requires <span class="math inline"><em>W</em> = 10</span> queries and incurs <span class="math inline"><em>D</em> &gt; 0</span> due to collisions.</figcaption>
 </figure>
 
 The Lean 4 formalization (Appendix [\[sec:lean\]](#sec:lean){reference-type="ref" reference="sec:lean"}) machine-checks the ambiguity-based converse and maximal-barrier lower bound that anchor this tradeoff analysis.
 
 ::: remark
-In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to interface-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
+In programming language terms: *nominal typing* corresponds to nominal-tag observers (e.g., CPython's `isinstance`, Java's `.getClass()`). *Duck typing* corresponds to attribute-only observers (e.g., Python's `hasattr`). *Structural typing* is an intermediate case with $D = 0$ but $W = O(n)$.
 :::
 
 ::: remark
@@ -784,17 +788,17 @@ Without a class tag, identity checks are structural and scale with inspected str
 
 ## Cross-Domain Summary
 
-  **Domain**      **Attribute-Only**       **Nominal Tag**      **$W$**
-  --------------- ------------------------ ------------------- ---------
-  Biology         Phenotype (morphology)   DNA barcode (COI)    $O(1)$
-  Libraries       Subject (Dewey)          ISBN                 $O(1)$
-  Databases       Column values            Primary key          $O(1)$
-  CPython         `hasattr` probing        `ob_type` pointer    $O(1)$
-  Java            Interface check          `.getClass()`        $O(1)$
-  TypeScript      Structural check         (none at runtime)    $O(s)$
-  Rust (static)   Trait bounds             `TypeId`             $O(1)$
+  **Domain**      **Attribute-Only**          **Nominal Tag**      **$W$**
+  --------------- --------------------------- ------------------- ---------
+  Biology         Phenotype (morphology)      DNA barcode (COI)    $O(1)$
+  Libraries       Subject (Dewey)             ISBN                 $O(1)$
+  Databases       Column values               Primary key          $O(1)$
+  CPython         `hasattr` probing           `ob_type` pointer    $O(1)$
+  Java            Attribute/interface check   `.getClass()`        $O(1)$
+  TypeScript      Structural check            (none at runtime)    $O(s)$
+  Rust (static)   Trait bounds                `TypeId`             $O(1)$
 
-  : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes/declared interfaces).
+  : Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes under declared attribute catalogs, e.g., interfaces in PL runtimes).
 
 The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.
 
@@ -893,7 +897,7 @@ Across domains, the same structure recurs:
 
 -   **Databases**: Column-value queries cannot distinguish rows with identical attributes. Primary keys (nominal tag) provide $O(1)$ identity.
 
--   **Type systems**: Interface observation cannot distinguish structurally identical types. Type tags provide $O(1)$ identity.
+-   **Type systems**: Attribute observation (interfaces/method signatures in this instantiation) cannot distinguish structurally identical types. Type tags provide $O(1)$ identity.
 
 The information barrier is not a quirk of any particular domain; it is a mathematical necessity arising from the quotient structure induced by limited observations.
 
@@ -902,6 +906,8 @@ The information barrier is not a quirk of any particular domain; it is a mathema
 -   **The necessity of nominal information is a theorem, not a preference.** Any zero-error scheme must satisfy the ambiguity converse $L \ge \log_2 A_\pi$ (Theorem [\[thm:converse\]](#thm:converse){reference-type="ref" reference="thm:converse"}), where $A_\pi$ is the largest collision block induced by observable profiles. In maximal-barrier domains ($A_\pi = k$), this becomes $L \ge \log_2 k$ and nominal tagging gives the unique $D=0$ Pareto point with $W=O(1)$ (Theorem [\[thm:lwd-optimal\]](#thm:lwd-optimal){reference-type="ref" reference="thm:lwd-optimal"}).
 
 -   **The barrier is informational, not computational**: even with unbounded resources, attribute-only observers cannot overcome it.
+
+-   **Fixed-axis systems are necessarily incomplete outside their axis**: by Corollary [\[cor:fixed-axis-incompleteness\]](#cor:fixed-axis-incompleteness){reference-type="ref" reference="cor:fixed-axis-incompleteness"}, any fixed-axis classifier is complete only for axis-measurable properties and cannot represent properties that vary within an axis fiber unless a new axis/tag is introduced.
 
 -   **Classification system design is constrained**: the choice of observation family determines which properties are computable.
 
@@ -954,9 +960,9 @@ Implementation-specific operational details and extended code listings are inclu
 
 The complete artifact contains 14 Lean files totaling 6589 lines and 296 theorem/lemma statements; the table above highlights the core modules directly used by the main-text derivations.
 
-## Interface-Only Formalization
+## Attribute-Only Formalization {#interface-only-formalization}
 
-Interface-only observation is formalized by an equivalence relation on values induced by observable query responses.
+Attribute-only observation is formalized by an equivalence relation on values induced by observable query responses.
 
 ``` {style="lean"}
 structure InterfaceValue where
@@ -976,7 +982,7 @@ def InterfaceRespecting (f : InterfaceValue -> a) : Prop :=
 
 ## Corollary 6.3: Provenance Impossibility {#corollary-6.3-interface-only-cannot-provide-provenance}
 
-Under interface-only observation, provenance is constant on interface-equivalence classes; therefore provenance cannot be recovered when distinct classes collide under the observable profile.
+Under attribute-only observation, provenance is constant on attribute-equivalence classes; therefore provenance cannot be recovered when distinct classes collide under the observable profile.
 
 ``` {style="lean"}
 theorem interface_provenance_indistinguishable
@@ -988,7 +994,7 @@ theorem interface_provenance_indistinguishable
   h_interface obj1 obj2 h_equiv
 ```
 
-This is the mechanized form of the main-text impossibility statement: if an observer factors through interface profile alone, it cannot separate equal-profile values by source/provenance.
+This is the mechanized form of the main-text impossibility statement: if an observer factors through attribute profile alone, it cannot separate equal-profile values by source/provenance.
 
 ## Abstract Model Lean Formalization
 

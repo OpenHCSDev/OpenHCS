@@ -9,12 +9,12 @@ Recall from Section 2 that observer strategies are characterized by three dimens
 
 We compare two observer classes:
 
-\begin{definition}[Interface-only observer]
-An observer that queries only interface membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit class tags.
+\begin{definition}[Attribute-only observer]
+An observer that queries only attribute membership ($q_I \in \Phi_{\mathcal{I}}$), with no access to explicit class tags.
 \end{definition}
 
 \begin{definition}[Nominal-tag observer]
-An observer that may read a single class identifier (nominal tag) per value, in addition to interface queries.
+An observer that may read a single class identifier (nominal tag) per value, in addition to attribute queries.
 \end{definition}
 
 \begin{theorem}[Pareto Optimality of Nominal-Tag Observers]\label{thm:lwd-optimal}
@@ -30,7 +30,7 @@ Let $A_\pi$ be the collision multiplicity (Definition~\ref{def:collision-multipl
 \item In general (non-maximal) domains, nominal tagging remains Pareto-optimal at $D=0$ but need not be unique: partial tags can coexist on the frontier.
 \end{enumerate}
 
-In information-barrier domains, interface-only observers (the $L=0$ face) satisfy:
+In information-barrier domains, attribute-only observers (the $L=0$ face) satisfy:
 \begin{itemize}
 \item \textbf{Tag length}: $L = 0$ bits (no explicit tag)
 \item \textbf{Witness cost}: $W = \Omega(d)$ queries (must query at least one minimal distinguishing set of size $d$, see Definition~\ref{def:distinguishing-dimension})
@@ -58,7 +58,7 @@ When $1 < A_\pi < k$, the $D=0$ frontier can include mixed designs: a partial ta
 The three-dimensional frontier shows:
 \begin{itemize}
 \item In maximal-barrier domains, the unique $D=0$ Pareto point is nominal tagging at $L=\lceil \log_2 k\rceil$.
-\item In general domains, interface-only observers trade tag length for distortion on the $L=0$ face when collisions are present.
+\item In general domains, attribute-only observers trade tag length for distortion on the $L=0$ face when collisions are present.
 \end{itemize}
 
 Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key observation is the ambiguity converse: the minimum zero-error tag rate is $\log_2 A_\pi$, with the maximal-barrier special case $\log_2 k$.
@@ -98,14 +98,14 @@ Figure~\ref{fig:lwd-tradeoff} visualizes the $(L, W, D)$ tradeoff space. The key
   \node[red, left] at (-0.1,1.8) {\footnotesize Duck ($D{>}0$)};
 
 \end{tikzpicture}
-\caption{Schematic illustration of the $(L, W, D)$ tradeoff. For a concrete example with $k = 1000$ classes, distinguishing dimension $d = 10$, and maximal barrier ($A_\pi = k$), the nominal-tag strategy achieves $L = 10$ bits, $W = O(1)$, $D = 0$, while the interface-only strategy requires $W = 10$ queries and incurs $D > 0$ due to collisions.}
+\caption{Schematic illustration of the $(L, W, D)$ tradeoff. For a concrete example with $k = 1000$ classes, distinguishing dimension $d = 10$, and maximal barrier ($A_\pi = k$), the nominal-tag strategy achieves $L = 10$ bits, $W = O(1)$, $D = 0$, while the attribute-only strategy requires $W = 10$ queries and incurs $D > 0$ due to collisions.}
 \label{fig:lwd-tradeoff}
 \end{figure}
 
 The Lean 4 formalization (Appendix~\ref{sec:lean}) machine-checks the ambiguity-based converse and maximal-barrier lower bound that anchor this tradeoff analysis.
 
 \begin{remark}[Programming language instantiations]
-In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to interface-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.
+In programming language terms: \emph{nominal typing} corresponds to nominal-tag observers (e.g., CPython's \texttt{isinstance}, Java's \texttt{.getClass()}). \emph{Duck typing} corresponds to attribute-only observers (e.g., Python's \texttt{hasattr}). \emph{Structural typing} is an intermediate case with $D = 0$ but $W = O(n)$.
 \end{remark}
 
 \begin{remark}[Structural-check cost parameter]

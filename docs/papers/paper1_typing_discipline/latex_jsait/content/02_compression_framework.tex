@@ -40,14 +40,14 @@ The core information-theoretic results of this paper require only $(\mathcal{V},
 In that instantiation, each value is characterized by:
 \begin{itemize}
 \item \textbf{Lineage axis ($B$)}: The provenance chain of the value's class (which classes it derives from, in what order)\footnote{In the Lean formalization (Appendix~\ref{formalization-and-verification}), the lineage axis is denoted \texttt{Bases}, reflecting its instantiation as the inheritance chain in object-oriented languages.}
-\item \textbf{Profile axis ($S$)}: The observable interface (which attributes/methods the value provides)
+\item \textbf{Profile axis ($S$)}: The observable attribute profile (interfaces/method signatures in the PL instantiation)
 \end{itemize}
 
 \begin{definition}[Two-axis representation]
 A value $v \in \mathcal{V}$ has representation $(B(v), S(v))$ where:
 \begin{align}
 B(v) &= \text{lineage}(\text{class}(v)) \quad \text{(class derivation chain)} \\
-S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(interface profile)}
+S(v) &= \pi(v) = (q_I(v))_{I \in \mathcal{I}} \quad \text{(attribute profile)}
 \end{align}
 The lineage axis captures \emph{nominal} identity: where the class comes from. The profile axis captures \emph{structural} identity: what the value can do.
 
@@ -55,7 +55,7 @@ In the PL instantiation, $B$ is carried by the runtime lineage order (e.g., C3/M
 \end{definition}
 
 \begin{theorem}[Fixed-axis completeness]\label{thm:model-completeness}
-Let a fixed-axis domain be specified by an axis map $\alpha: \mathcal{V} \to \mathcal{A}$ and an observation interface $\Phi$ such that each primitive query $q \in \Phi$ factors through $\alpha$. Then every in-scope semantic property (i.e., any property computable by an admissible $\Phi$-only strategy) factors through $\alpha$: there exists $\tilde{P}$ with
+Let a fixed-axis domain be specified by an axis map $\alpha: \mathcal{V} \to \mathcal{A}$ and an observation family $\Phi$ such that each primitive query $q \in \Phi$ factors through $\alpha$. Then every in-scope semantic property (i.e., any property computable by an admissible $\Phi$-only strategy) factors through $\alpha$: there exists $\tilde{P}$ with
 \[
 P(v) = \tilde{P}(\alpha(v)) \quad \text{for all } v \in \mathcal{V}.
 \]
@@ -67,24 +67,28 @@ In the PL instantiation, $\alpha(v) = (B(v), S(v))$, so in-scope semantic proper
 An admissible $\Phi$-only strategy observes $v$ solely through responses to primitive queries $q_I \in \Phi$. By hypothesis each such response is a function of $\alpha(v)$. Therefore every query transcript, and hence any strategy's output, depends only on $\alpha(v)$, so the computed property factors through $\alpha$.
 \end{proof}
 
-\subsection{Interface Equivalence and Observational Limits}
+\begin{corollary}[Fixed-Axis Incompleteness]\label{cor:fixed-axis-incompleteness}
+Any fixed-axis classification system is complete only for properties measurable on the fixed axis map $\alpha$, and incomplete for any property that varies within an $\alpha$-fiber. Equivalently, if $\alpha(v)=\alpha(w)$ but $P(v)\neq P(w)$, then no admissible $\Phi$-only strategy can compute $P$ with zero error.
+\end{corollary}
 
-Recall from Section 1 the interface equivalence relation:
+\subsection{Attribute Equivalence and Observational Limits}
 
-\begin{definition}[Interface equivalence (restated)]
-Values $v, w \in \mathcal{V}$ are interface-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$, i.e., they satisfy exactly the same interfaces.
+Recall from Section 1 the attribute equivalence relation:
+
+\begin{definition}[Attribute equivalence (restated)]
+Values $v, w \in \mathcal{V}$ are attribute-equivalent, written $v \sim w$, iff $\pi(v) = \pi(w)$, i.e., they induce exactly the same attribute responses.
 \end{definition}
 
 \begin{proposition}[Equivalence class structure]
-The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mathcal{V}/{\sim}$ denote the quotient space. An interface-only observer effectively operates on $\mathcal{V}/{\sim}$, not $\mathcal{V}$.
+The relation $\sim$ partitions $\mathcal{V}$ into equivalence classes. Let $\mathcal{V}/{\sim}$ denote the quotient space. An attribute-only observer effectively operates on $\mathcal{V}/{\sim}$, not $\mathcal{V}$.
 \end{proposition}
 
 \begin{corollary}[Information loss quantification]
-The information lost by interface-only observation is:
+The information lost by attribute-only observation is:
 \[
 H(\mathcal{V}) - H(\mathcal{V}/{\sim}) = H(\mathcal{V} | \pi)
 \]
-where $H$ denotes entropy. This quantity is positive whenever multiple classes share the same interface profile.
+where $H$ denotes entropy. This quantity is positive whenever multiple classes share the same attribute profile.
 \end{corollary}
 
 \subsection{Identification Capacity}\label{sec:identification-capacity}
@@ -160,8 +164,8 @@ Witness cost is a form of query complexity \cite{buhrman2002complexity} speciali
 \begin{lemma}[Witness cost lower bounds]
 For any property $P$:
 \begin{enumerate}
-\item If $P$ is interface-computable: $W(P) \leq |\mathcal{I}|$
-\item If $P$ varies within some $\sim$-class: $W(P) = \infty$ for interface-only observers
+\item If $P$ is attribute-computable: $W(P) \leq |\mathcal{I}|$
+\item If $P$ varies within some $\sim$-class: $W(P) = \infty$ for attribute-only observers
 \item With nominal-tag access: $W(\text{class-identity}) = O(1)$
 \end{enumerate}
 \end{lemma}
@@ -175,7 +179,7 @@ For a set of class identifiers (tags) $\mathcal{T}$ with $|\mathcal{T}| = k$, th
 \[
 L \geq \log_2 k \quad \text{bits per value}
 \]
-For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For interface-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over classes, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem \cite{shannon1959coding}.
+For nominal-tag observers, $L = \lceil \log_2 k \rceil$ (optimal prefix-free encoding). For attribute-only observers, $L = 0$ (no explicit tag stored). Under a distribution $P$ over classes, the expected tag length is $\mathbb{E}[L] \geq H(P)$ by Shannon's source coding theorem \cite{shannon1959coding}.
 \end{definition}
 
 \begin{definition}[Witness cost (Query/Communication complexity)]
@@ -296,7 +300,7 @@ Consider a classification system with $k = 1000$ classes, each characterized by 
 
 \begin{table}[t]
 \centering
-\caption{Identification strategies for 1000 classes with 50 methods.}
+\caption{Identification strategies for 1000 classes with 50 attributes.}
 \label{tab:strategies}
 \begin{tabular}{lcc}
 \toprule

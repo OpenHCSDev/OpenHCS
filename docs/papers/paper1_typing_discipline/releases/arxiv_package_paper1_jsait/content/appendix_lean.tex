@@ -36,9 +36,9 @@ Implementation-specific operational details and extended code listings are inclu
 \paragraph{Artifact totals.}
 The complete artifact contains 14 Lean files totaling 6589 lines and 296 theorem/lemma statements; the table above highlights the core modules directly used by the main-text derivations.
 
-\subsection{Interface-Only Formalization}\label{interface-only-formalization}
+\subsection{Attribute-Only Formalization}\label{interface-only-formalization}
 
-Interface-only observation is formalized by an equivalence relation on values induced by observable query responses.
+Attribute-only observation is formalized by an equivalence relation on values induced by observable query responses.
 
 \begin{lstlisting}[style=lean]
 structure InterfaceValue where
@@ -58,7 +58,7 @@ def InterfaceRespecting (f : InterfaceValue -> a) : Prop :=
 
 \subsection{Corollary 6.3: Provenance Impossibility}\label{corollary-6.3-interface-only-cannot-provide-provenance}
 
-Under interface-only observation, provenance is constant on interface-equivalence classes; therefore provenance cannot be recovered when distinct classes collide under the observable profile.
+Under attribute-only observation, provenance is constant on attribute-equivalence classes; therefore provenance cannot be recovered when distinct classes collide under the observable profile.
 
 \begin{lstlisting}[style=lean]
 theorem interface_provenance_indistinguishable
@@ -70,7 +70,7 @@ theorem interface_provenance_indistinguishable
   h_interface obj1 obj2 h_equiv
 \end{lstlisting}
 
-This is the mechanized form of the main-text impossibility statement: if an observer factors through interface profile alone, it cannot separate equal-profile values by source/provenance.
+This is the mechanized form of the main-text impossibility statement: if an observer factors through attribute profile alone, it cannot separate equal-profile values by source/provenance.
 
 \subsection{Abstract Model Lean Formalization}\label{abstract-model-lean-formalization}
 

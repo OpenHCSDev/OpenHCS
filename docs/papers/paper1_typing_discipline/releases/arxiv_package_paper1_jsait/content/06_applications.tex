@@ -56,12 +56,12 @@ Biology & Phenotype (morphology) & DNA barcode (COI) & $O(1)$ \\
 Libraries & Subject (Dewey) & ISBN & $O(1)$ \\
 Databases & Column values & Primary key & $O(1)$ \\
 CPython & \texttt{hasattr} probing & \texttt{ob\_type} pointer & $O(1)$ \\
-Java & Interface check & \texttt{.getClass()} & $O(1)$ \\
+Java & Attribute/interface check & \texttt{.getClass()} & $O(1)$ \\
 TypeScript & Structural check & (none at runtime) & $O(s)$ \\
 Rust (static) & Trait bounds & \texttt{TypeId} & $O(1)$ \\
 \hline
 \end{tabular}
-\caption{Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes/declared interfaces).}
+\caption{Witness cost for identity across classification systems. Nominal tags achieve $O(1)$; attribute-only pays $O(s)$ per structural check (or $O(k)$ when enumerating classes under declared attribute catalogs, e.g., interfaces in PL runtimes).}
 \end{table}
 
 The pattern is universal: systems with nominal tags achieve $O(1)$ witness cost; systems without them pay $O(s)$ or $O(k)$. This is not domain-specific; it is the information barrier theorem instantiated across classification systems.

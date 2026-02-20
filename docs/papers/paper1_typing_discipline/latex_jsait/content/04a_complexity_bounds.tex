@@ -15,12 +15,12 @@ $E(\text{nominal-tag}) = O(1)$.
 Under nominal-tag observation, the constraint ``$v$ must be of class $A$'' is satisfied iff $\tau(v) \in \text{subtypes}(A)$. This is determined at a single location: the definition of $\tau(v)$'s class. One location.
 \end{proof}
 
-\begin{theorem}[Declared interface localization]\label{thm:declared-localization}
-$E(\text{interface-only, declared}) = O(k)$ where $k$ = number of entity classes.
+\begin{theorem}[Declared-attribute localization]\label{thm:declared-localization}
+$E(\text{attribute-only, declared}) = O(k)$ where $k$ = number of entity classes.
 \end{theorem}
 
 \begin{proof}
-With declared interfaces, the constraint ``$v$ must satisfy interface $I$'' requires verifying that each class implements all attributes in $I$. For $k$ classes, $O(k)$ locations.
+With declared attribute sets (interfaces in the PL instantiation), the constraint ``$v$ must satisfy attribute $I$'' requires verifying that each class satisfies all attributes in $I$. For $k$ classes, $O(k)$ locations.
 \end{proof}
 
 \begin{theorem}[Attribute-only localization]\label{thm:attribute-localization}
