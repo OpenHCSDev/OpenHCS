@@ -73,13 +73,13 @@ W.~R. Cook, W.~Hill, and P.~S. Canning, ``Inheritance is not subtyping,'' in
   \emph{Proceedings of the 17th ACM SIGPLAN-SIGACT Symposium on Principles of
   Programming Languages}, 1990, pp. 125--135.
 
-\bibitem{DNABarcoding}
-P.~D.~N. Hebert, A.~Cywinska, S.~L. Ball, and J.~R. deWaard, ``Biological
-  identifications through dna barcodes,'' pp. 313--321, 2003.
-
 \bibitem{Welsh1976}
 D.~J.~A. Welsh, \emph{Matroid Theory}.\hskip 1em plus 0.5em minus 0.4em\relax
   Academic Press, 1976.
+
+\bibitem{DNABarcoding}
+P.~D.~N. Hebert, A.~Cywinska, S.~L. Ball, and J.~R. deWaard, ``Biological
+  identifications through dna barcodes,'' pp. 313--321, 2003.
 
 \bibitem{ISBN}
 {International ISBN Agency}, \emph{ISBN Users' Manual}, 7th~ed.\hskip 1em plus

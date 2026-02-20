@@ -1,7 +1,7 @@
 \begin{abstract}
-We extend classical rate-distortion theory to a discrete classification setting with three resources: \emph{tag rate} $L$ (bits of storage per entity), \emph{identification cost} $W$ (queries to determine class membership), and \emph{distortion} $D$ (misidentification probability). The fundamental question is: how do these resources trade off when an observer must identify an entity's class from limited observations?
+We extend classical rate-distortion and zero-error identification to a discrete classification setting with three resources: \emph{tag rate} $L$ (bits of storage per entity), \emph{identification cost} $W$ (attribute queries to determine class membership), and \emph{distortion} $D$ (misidentification probability). The central question is how these resources trade off when an observer must identify class identity from constrained evidence.
 
-\textbf{Information barrier (zero-error identifiability).} When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify the class from attribute queries alone. Formally: if $\pi$ is not injective on classes, then zero-error identification from attribute queries alone is impossible.
+\textbf{Information barrier (zero-error identifiability).} When distinct classes share identical attribute profiles, no algorithm, regardless of computational power, can identify class identity from attribute queries alone. Formally: if $\pi$ is not injective on classes, then zero-error identification from attribute queries alone is impossible.
 
 \textbf{Rate-identification tradeoff.} Let $A_\pi := \max_u |\{c : \pi(c)=u\}|$ be the maximum collision multiplicity induced by the attribute profile map. We show that zero-error identification requires at least $\lceil \log_2 A_\pi \rceil$ tag bits, and this bound is tight. In the maximal-barrier regime ($A_\pi = k$), the nominal-tag point $(L,W,D)=(\lceil \log_2 k\rceil,O(1),0)$ is the unique Pareto-optimal zero-error point. Without tags ($L = 0$), zero-error identification requires $W = \Omega(d)$ attribute queries, where $d$ is the distinguishing dimension; in the worst case $d = n$ (the ambient attribute count), giving $W = \Omega(n)$.
 
@@ -9,11 +9,10 @@ We extend classical rate-distortion theory to a discrete classification setting 
 
 \textbf{Matroid structure.} Minimal sufficient query sets form the bases of a matroid. The \emph{distinguishing dimension} (the common cardinality of all minimal query sets) is well-defined, connecting to zero-error source coding via graph entropy.
 
-\textbf{Applications.} The theory instantiates to databases (key vs. attribute lookup), knowledge graphs, biological taxonomy (genotype vs. phenotype), and type systems (nominal vs. structural typing). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) explains convergence toward hybrid systems combining attribute-based observation with nominal tagging.
+\textbf{Cross-domain corollary.} The theory instantiates to databases (key vs. attribute lookup), knowledge graphs, biological taxonomy (genotype vs. phenotype), and typed software systems (nominal vs. structural classification). The unbounded gap $\Omega(d)$ vs. $O(1)$ (with a worst-case family where $d = n$) gives a formal cost account for when nominal identity metadata becomes necessary rather than stylistic.
+As a modern corollary, the same ambiguity converse applies to model-identity metadata in learning systems: zero-error identification requires at least $\lceil \log_2 A_\pi \rceil$ bits, while attribute-only identification can require $\Omega(d)$ feature queries.
 
 All results are machine-checked in Lean 4 (6589 lines, 296 theorem/lemma statements, 0 \texttt{sorry}).
-
-In machine learning systems, the framework characterizes optimal compression of model metadata: $\lceil \log_2 k \rceil$ bits suffice for model identification and versioning, while attribute-based approaches (architecture fingerprints, hyperparameter profiles) require $\Omega(d)$ feature comparisons.
 
 \textbf{Keywords:} rate-distortion theory, identification capacity, zero-error source coding, query complexity, matroid structure, classification systems
 \end{abstract}
