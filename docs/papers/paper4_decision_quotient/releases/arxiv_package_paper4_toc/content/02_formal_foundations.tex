@@ -82,6 +82,8 @@ This measures the fraction of actions that are optimal for at least one state co
 
 \begin{proposition}[Sufficiency Characterization]\label{prop:sufficiency-char}
 Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$.
+\textit{(Lean finite-model form: \nolinkurl{ClaimClosure.sufficiency_iff_dq_ratio},
+\nolinkurl{ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt})}
 \end{proposition}
 
 \begin{proof}
@@ -150,6 +152,7 @@ Consider an instance of Definition~\ref{def:adjacent-sequential-regime} satisfyi
 \item no post-decision state update relevant to the objective.
 \end{enumerate}
 Then the induced optimization problem is exactly the static decision problem of Definition~\ref{def:decision-problem}, and coordinate sufficiency in the sequential formulation is equivalent to Definition~\ref{def:sufficient}.
+\textit{(Lean bridge core: \nolinkurl{ClaimClosure.one_step_bridge})}
 \end{proposition}
 
 \begin{proof}

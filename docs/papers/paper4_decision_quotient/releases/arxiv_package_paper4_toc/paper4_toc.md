@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 6553 lines, 280 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7060 lines, 310 theorems
 
 ---
 
@@ -20,7 +20,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (6553 lines, 280 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7060 lines, 310 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -77,7 +77,7 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (6553 lines, 280 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7060 lines, 310 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -157,7 +157,7 @@ The minimal sufficient set is $I = \{1\}$ (only rain forecast matters). Coordina
 :::
 
 ::: proposition
-[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$.
+[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$. *(Lean finite-model form: `ClaimClosure.sufficiency_iff_dq_ratio`, `ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt`)*
 :::
 
 ::: proof
@@ -237,7 +237,7 @@ This tagging is a claim-typing convention: each strong statement is attached to 
 
 4.  no post-decision state update relevant to the objective.
 
-Then the induced optimization problem is exactly the static decision problem of Definition [\[def:decision-problem\]](#def:decision-problem){reference-type="ref" reference="def:decision-problem"}, and coordinate sufficiency in the sequential formulation is equivalent to Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}.
+Then the induced optimization problem is exactly the static decision problem of Definition [\[def:decision-problem\]](#def:decision-problem){reference-type="ref" reference="def:decision-problem"}, and coordinate sufficiency in the sequential formulation is equivalent to Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}. *(Lean bridge core: `ClaimClosure.one_step_bridge`)*
 :::
 
 ::: proof
@@ -673,7 +673,7 @@ These are exactly the model-contract premises C1--C3 instantiated for configurat
 :::
 
 ::: theorem
-Over-Modeling as Boundary-Signal Corollary\] []{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} []{#cor:overmodel-diagnostic label="cor:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if no coordinate set can be certified as exactly relevance-identifying (Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization.
+Over-Modeling as Boundary-Signal Corollary\] []{#thm:overmodel-diagnostic label="thm:overmodel-diagnostic"} []{#cor:overmodel-diagnostic label="cor:overmodel-diagnostic"} By contraposition of Theorem [\[thm:config-reduction\]](#thm:config-reduction){reference-type="ref" reference="thm:config-reduction"}, if no coordinate set can be certified as exactly relevance-identifying (Definition [\[def:exact-identifiability\]](#def:exact-identifiability){reference-type="ref" reference="def:exact-identifiability"}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization. *(Lean model-level contrapositive: `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`)*
 :::
 
 ::: proof
@@ -732,6 +732,8 @@ For any fixed nonnegative $C_{\text{under}}$, the asymptotic dominance inequalit
 2.  Identifies the minimal sufficient parameter subset
 
 3.  Guarantees correctness (no false negatives)
+
+*(Lean conditional closure: `ClaimClosure.no_auto_minimize_of_p_neq_conp`)*
 :::
 
 ::: proof
@@ -792,7 +794,7 @@ For a software system with configuration space $S$ and behavior space $B$: $$\te
 :::
 
 ::: proposition
-[]{#prop:adq-ordering label="prop:adq-ordering"} For coordinate sets $I,J$ in the same system, if $\mathrm{ADQ}(I) < \mathrm{ADQ}(J)$, then fixing $I$ leaves a strictly smaller achievable-behavior set than fixing $J$.
+[]{#prop:adq-ordering label="prop:adq-ordering"} For coordinate sets $I,J$ in the same system, if $\mathrm{ADQ}(I) < \mathrm{ADQ}(J)$, then fixing $I$ leaves a strictly smaller achievable-behavior set than fixing $J$. *(Lean finite-cardinality form: `ClaimClosure.adq_ordering`)*
 :::
 
 ::: proof
@@ -1207,7 +1209,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 6553 lines across 41 files, with 280 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7060 lines across 42 files, with 310 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1285,101 +1287,93 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
 **Identifier note.** Lean identifiers retain internal naming (`intrinsicDOF`, `simplicityTax_conservation`); in paper terminology these correspond to *baseline hardness* and the *redistribution lower-bound identity*, respectively.
 
-## Engineering Corollary Mapping
+## Complete Claim Coverage Matrix
 
-  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  **Paper handle**                            **Lean theorem**                                                                        **Lean file**
-  ------------------------------------------- --------------------------------------------------------------------------------------- -------------------------------------------------------
-  `cor:overmodel-diagnostic-implication`      `Sigma2PHardness.sufficient_iff_relevant_subset`                                        `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  **Paper handle**                            **Status**           **Lean support**                                                                                                                                                                                                                                                                                                                                       **Notes**
+  ------------------------------------------- -------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ -------------------------------------------------------------------------------------------------------------------------
+  `cor:exact-identifiability`                 Full                 `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`                                                                                                                                                                                                                                                                   Direct theorem mapping.
 
-  `cor:exact-identifiability`                 `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`    `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+  `cor:gap-externalization`                   Full                 `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`, `HardnessDistribution.simplicityTax_grows`                                                                                                                                                                                                                                                  Composite from two mechanized theorems.
 
-  `thm:config-reduction`                      `ConfigReduction.config_sufficiency_iff_behavior_preserving`                            `DecisionQuotient/Hardness/ConfigReduction.lean`
+  `cor:gap-minimization-hard`                 Full                 `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                                                                                                                                                                                                                                                                                 Direct theorem mapping.
 
-                                                                                                                                      
+  `cor:generalized-eventual-dominance`        Full                 `HardnessDistribution.generalized_right_eventually_dominates_wrong`                                                                                                                                                                                                                                                                                    Direct theorem mapping.
 
-  `asymmetry-eth`                             `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`                   `DecisionQuotient/HardnessDistribution.lean`
+  `cor:linear-positive-no-saturation`         Full                 `HardnessDistribution.no_positive_slope_linear_represents_saturating`                                                                                                                                                                                                                                                                                  Direct theorem mapping.
 
-                                                                                                                                      
+  `cor:no-auto-minimize`                      Full (conditional)   `ClaimClosure.no_auto_minimize_of_p_neq_conp`                                                                                                                                                                                                                                                                                                          Mechanized conditional closure: non-collapse plus collapse-implication yields impossibility.
 
-  `competence-forward`                        `IntegrityCompetence.competence_implies_integrity`                                      `DecisionQuotient/IntegrityCompetence.lean`
+  `cor:overmodel-diagnostic`                  Full                 `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`, `ConfigReduction.config_sufficiency_iff_behavior_preserving`                                                                                                                                                 Contrapositive diagnostic step is mechanized in the Boolean model with explicit boundary predicate.
 
-                                                                                                                                      
+  `cor:overmodel-diagnostic-implication`      Full                 `Sigma2PHardness.sufficient_iff_relevant_subset`                                                                                                                                                                                                                                                                                                       Contrapositive of mechanized theorem.
 
-  `competence-strict`                         `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                         `DecisionQuotient/IntegrityCompetence.lean`
+  `cor:practice-bounded`                      Full                 `sufficiency_poly_bounded_actions`                                                                                                                                                                                                                                                                                                                     Direct theorem mapping.
 
-  `cor:practice-diagnostic`                   `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                  `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+  `cor:practice-diagnostic`                   Full                 `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                                                                                                                                                                                                                                                                                 Direct theorem mapping.
 
-  `cor:practice-bounded`                      `sufficiency_poly_bounded_actions`                                                      `DecisionQuotient/Tractability/BoundedActions.lean`
+  `cor:practice-structured`                   Full                 `sufficiency_poly_separable`                                                                                                                                                                                                                                                                                                                           Direct theorem mapping.
 
-  `cor:practice-structured`                   `sufficiency_poly_separable`                                                            `DecisionQuotient/Tractability/SeparableUtility.lean`
+  `cor:practice-tree`                         Full                 `sufficiency_poly_tree_structured`                                                                                                                                                                                                                                                                                                                     Direct theorem mapping.
 
-  `cor:practice-tree`                         `sufficiency_poly_tree_structured`                                                      `DecisionQuotient/Tractability/TreeStructure.lean`
+  `cor:practice-unstructured`                 Full                 `all_coords_relevant_of_not_tautology`                                                                                                                                                                                                                                                                                                                 Direct theorem mapping.
 
-  `cor:practice-unstructured`                 `all_coords_relevant_of_not_tautology`                                                  `DecisionQuotient/Reduction_AllCoords.lean`
+  `cor:right-wrong-hardness`                  Full                 `HardnessDistribution.right_dominates_wrong`                                                                                                                                                                                                                                                                                                           Direct theorem mapping.
 
-  `prop:hardness-conservation`                `HardnessDistribution.totalDOF_ge_intrinsic`                                            `DecisionQuotient/HardnessDistribution.lean`
+  `cor:type-system-threshold`                 Full                 `HardnessDistribution.native_dominates_manual`                                                                                                                                                                                                                                                                                                         Direct theorem mapping.
 
-  `prop:hardness-efficiency-interpretation`   `HardnessDistribution.hardnessEfficiency_eq_central_share`                              `DecisionQuotient/HardnessDistribution.lean`
+  `prop:adq-ordering`                         Full                 `ClaimClosure.adq_ordering`                                                                                                                                                                                                                                                                                                                            Strict ordering theorem for shared nonempty behavior denominator.
 
-                                                                                                                                      
+  `prop:dominance-modes`                      Full                 `HardnessDistribution.right_dominates_wrong`, `HardnessDistribution.centralized_higher_leverage`, `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`, `HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth`, `HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness`   Compositional index proposition.
 
-  `centralization-`                                                                                                                   
+  `prop:generalized-assumption-boundary`      Full                 `HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth`, `HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness`                                                                                                                                                                                            Direct pair mapping.
 
-  `dom-1-2`                                   `HardnessDistribution.centralization_dominance_bundle`                                  `DecisionQuotient/HardnessDistribution.lean`
+  `prop:hardness-conservation`                Full                 `HardnessDistribution.totalDOF_ge_intrinsic`                                                                                                                                                                                                                                                                                                           Direct structural core theorem.
 
-                                                                                                                                      
+  `prop:hardness-efficiency-interpretation`   Full                 `HardnessDistribution.hardnessEfficiency_eq_central_share`                                                                                                                                                                                                                                                                                             Direct definitional equivalence.
 
-  `centralization-`                                                                                                                   
+  `prop:integrity-competence-separation`      Full                 `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                                                                                                                                                                                                                                    Direct pair mapping.
 
-  `dom-3`                                     `HardnessDistribution.centralization_step_saves_n_minus_one`                            `DecisionQuotient/HardnessDistribution.lean`
+  `prop:one-step-bridge`                      Full                 `ClaimClosure.one_step_bridge`                                                                                                                                                                                                                                                                                                                         One-step deterministic bridge is mechanized as an equivalence of sufficiency predicates.
 
-  `cor:right-wrong-hardness`                  `HardnessDistribution.right_dominates_wrong`                                            `DecisionQuotient/HardnessDistribution.lean`
+  `prop:sufficiency-char`                     Full                 `ClaimClosure.sufficiency_iff_dq_ratio`, `ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt`                                                                                                                                                                                                                                                       Finite-model quotient characterization mechanized in both ratio form and projected-cover form.
 
-  `cor:type-system-threshold`                 `HardnessDistribution.native_dominates_manual`                                          `DecisionQuotient/HardnessDistribution.lean`
+  `thm:amortization`                          Full                 `HardnessDistribution.complete_model_dominates_after_threshold`                                                                                                                                                                                                                                                                                        Direct theorem mapping.
 
-  `thm:tax-conservation`                      `HardnessDistribution.gap_conservation_card`                                            `DecisionQuotient/HardnessDistribution.lean`
+  `thm:anchor-sigma2p`                        Full (conditional)   `ClaimClosure.anchor_sigma2p_reduction_core`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `anchor_sufficiency_sigma2p`                                                                                                                                                                                                                         Reduction core is mechanized; completeness lift is mechanized as a conditional transfer on standard source-class facts.
 
-  `thm:tax-grows`                             `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                               `DecisionQuotient/HardnessDistribution.lean`
+  `thm:centralization-dominance`              Full                 `HardnessDistribution.centralization_dominance_bundle`, `HardnessDistribution.centralization_step_saves_n_minus_one`                                                                                                                                                                                                                                   Direct pair mapping.
 
-  `thm:amortization`                          `HardnessDistribution.complete_model_dominates_after_threshold`                         `DecisionQuotient/HardnessDistribution.lean`
+  `thm:config-reduction`                      Full                 `ConfigReduction.config_sufficiency_iff_behavior_preserving`                                                                                                                                                                                                                                                                                           Direct theorem mapping.
 
-                                                                                                                                      
+  `thm:cost-asymmetry-eth`                    Full (conditional)   `ClaimClosure.cost_asymmetry_eth_conditional`, `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`                                                                                                                                                                                                                                   Asymptotic dominance and ETH-conditioned lift are both mechanized.
 
-  `externalization-id`                        `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                               `DecisionQuotient/HardnessDistribution.lean`
+  `thm:dichotomy`                             Full (conditional)   `ClaimClosure.dichotomy_conditional`, `ClaimClosure.hard_family_all_coords_core`, `ClaimClosure.explicit_state_upper_core`                                                                                                                                                                                                                             Upper-branch core and hard-family core are mechanized; ETH lower branch is mechanized as conditional transfer.
 
-                                                                                                                                      
+  `thm:generalized-dominance`                 Full                 `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`                                                                                                                                                                                                                                                                  Direct theorem mapping.
 
-  `gap-`                                                                                                                              
+  `thm:generalized-saturation-possible`       Full                 `HardnessDistribution.saturatingSiteCost_eventually_constant`, `HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`                                                                                                                                                                                                             Direct construction mapping.
 
-  `externalization-`                                                                                                                  
+  `thm:linear-saturation-iff-zero`            Full                 `HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`                                                                                                                                                                                                                                                                               Direct theorem mapping.
 
-  `grow`                                      `HardnessDistribution.simplicityTax_grows`                                              `DecisionQuotient/HardnessDistribution.lean`
+  `thm:minsuff-collapse`                      Full (conditional)   `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_collapse_to_conp_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                                                                                                                                                                                      Quantifier collapse core and coNP-reading lift are mechanized.
 
-  `cor:gap-minimization-hard`                 `Sigma2PHardness.min_sufficient_set_iff_relevant_card`                                  `DecisionQuotient/Hardness/Sigma2PHardness.lean`
+  `thm:minsuff-conp`                          Full (conditional)   `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_conp_complete_conditional`                                                                                                                                                                                                                                                                 coNP-completeness transfer is mechanized conditionally from the collapse core.
 
-  `thm:linear-saturation-iff-zero`            `HardnessDistribution.totalDOF_eventually_constant_iff_zero_distributed`                `DecisionQuotient/HardnessDistribution.lean`
+  `thm:overmodel-diagnostic`                  Full                 `ClaimClosure.no_exact_identifier_implies_not_boundary_characterized`, `ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset`, `ConfigReduction.config_sufficiency_iff_behavior_preserving`                                                                                                                                                 Contrapositive diagnostic step mechanized under explicit boundary-characterization definition.
 
-  `thm:generalized-saturation-possible`       `HardnessDistribution.generalizedTotal_with_saturation_eventually_constant`             `DecisionQuotient/HardnessDistribution.lean`
+  `thm:sufficiency-conp`                      Full (conditional)   `ClaimClosure.sufficiency_conp_reduction_core`, `ClaimClosure.sufficiency_conp_complete_conditional`, `tautology_iff_sufficient`                                                                                                                                                                                                                       Reduction core and coNP-completeness transfer are mechanized conditionally.
 
-  `cor:linear-positive-no-saturation`         `HardnessDistribution.no_positive_slope_linear_represents_saturating`                   `DecisionQuotient/HardnessDistribution.lean`
+  `thm:tax-conservation`                      Full                 `HardnessDistribution.gap_conservation_card`                                                                                                                                                                                                                                                                                                           Direct theorem mapping.
 
-  `thm:generalized-dominance`                 `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`   `DecisionQuotient/HardnessDistribution.lean`
+  `thm:tax-grows`                             Full                 `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                                                                                                                                                                                                                                                                                              Direct theorem mapping.
 
-  `cor:generalized-eventual-dominance`        `HardnessDistribution.generalized_right_eventually_dominates_wrong`                     `DecisionQuotient/HardnessDistribution.lean`
+  `thm:tractable`                             Full (conditional)   `ClaimClosure.tractable_bounded_core`, `ClaimClosure.tractable_separable_core`, `ClaimClosure.tractable_tree_core`, `ClaimClosure.tractable_subcases_conditional`                                                                                                                                                                                      All three tractable branch cores and assembly closure are mechanized.
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-                                                                                                                                      
+## Claims Not Fully Mechanized
 
-  `assumption-`                                                                                                                       
-
-  `boundary (1)`                              `HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth`              `DecisionQuotient/HardnessDistribution.lean`
-
-                                                                                                                                      
-
-  `assumption-`                                                                                                                       
-
-  `boundary (2)`                              `HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness`         `DecisionQuotient/HardnessDistribution.lean`
-  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+**Status:** all theorem/proposition/corollary handles in this paper now have Lean backing. Entries marked **Full (conditional)** are explicitly mechanized transfer theorems that depend on standard external complexity facts (e.g., source-class completeness or ETH assumptions), with those dependencies represented as hypotheses in Lean.
 
 ## Module Structure
 
@@ -1397,6 +1391,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
 -   `IntegrityCompetence.lean` -- Solver integrity vs regime competence separation
 
+-   `ClaimClosure.lean` -- Mechanized closure of paper-level bridge and diagnostic claims
+
 -   `Tractability/` -- Bounded actions, separable utilities, tree structure
 
 ## Verification
@@ -1412,6 +1408,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 6553
-- Theorems: 280
+- Lines: 7060
+- Theorems: 310
 - `sorry` placeholders: 0

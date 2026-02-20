@@ -69,6 +69,8 @@ These are exactly the model-contract premises C1--C3 instantiated for configurat
 \label{thm:overmodel-diagnostic}
 \label{cor:overmodel-diagnostic}
 By contraposition of Theorem~\ref{thm:config-reduction}, if no coordinate set can be certified as exactly relevance-identifying (Definition~\ref{def:exact-identifiability}) for the modeled system, then the decision boundary is not completely characterized by the current parameterization.
+\textit{(Lean model-level contrapositive: \nolinkurl{ClaimClosure.no_exact_identifier_implies_not_boundary_characterized},
+\nolinkurl{ClaimClosure.boundaryCharacterized_iff_exists_sufficient_subset})}
 \end{theorem}
 
 \begin{proof}
@@ -135,6 +137,7 @@ Assuming $\Pclass \neq \coNP$, there exists no polynomial-time algorithm that:
 \item Identifies the minimal sufficient parameter subset
 \item Guarantees correctness (no false negatives)
 \end{enumerate}
+\textit{(Lean conditional closure: \nolinkurl{ClaimClosure.no_auto_minimize_of_p_neq_conp})}
 \end{corollary}
 
 \begin{proof}
