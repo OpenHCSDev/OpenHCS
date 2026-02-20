@@ -225,5 +225,118 @@ theorem manual_errors_grow (P : SpecificationProblem) (n : ℕ) (hn : n > 0) :
   · exact hn
   · exact manual_is_wrong P
 
-end DecisionQuotient.HardnessDistribution
+/-! ## Simplicity-Tax Named Corollaries (LaTeX Section 8 Handles) -/
 
+/-- Simplicity tax in this model is exactly distributed DOF. -/
+def simplicityTax (P : SpecificationProblem) (S : SolutionArchitecture P) : ℕ :=
+  S.distributedDOF
+
+/-- Conservation restated with SimplicityTax notation. -/
+theorem simplicityTax_conservation (P : SpecificationProblem) (S : SolutionArchitecture P) :
+    S.centralDOF + simplicityTax P S ≥ P.intrinsicDOF := by
+  simpa [simplicityTax] using dof_conservation P S
+
+/-- Positive simplicity tax implies total work grows with use-site count. -/
+theorem simplicityTax_grows (P : SpecificationProblem) (S : SolutionArchitecture P)
+    (n₁ n₂ : ℕ) (hn : n₁ < n₂) (htax : simplicityTax P S > 0) :
+    totalDOF S n₁ < totalDOF S n₂ := by
+  have hd : S.distributedDOF > 0 := by
+    simpa [simplicityTax] using htax
+  exact distributed_multiplies S n₁ n₂ hn hd
+
+/-- Amortization threshold instantiated by native-vs-manual architecture. -/
+theorem amortization_threshold_native_manual (P : SpecificationProblem) (n : ℕ)
+    (hn : n > P.intrinsicDOF) :
+    totalDOF (nativeTypeSystem P) n < totalDOF (manualApproach P) n := by
+  exact native_dominates_manual P n hn
+
+/-! ## Extension: Non-Additive Site-Cost Models -/
+
+/-- A cost function is eventually constant if it stabilizes after some index. -/
+def IsEventuallyConstant (f : ℕ → ℕ) : Prop :=
+  ∃ N : ℕ, ∀ n ≥ N, f n = f N
+
+/-- In the linear model, distributedDOF = 0 implies eventual constancy. -/
+theorem totalDOF_eventually_constant_of_zero_distributed (S : SolutionArchitecture P)
+    (h0 : S.distributedDOF = 0) :
+    IsEventuallyConstant (fun n => totalDOF S n) := by
+  refine ⟨0, ?_⟩
+  intro n _
+  simpa using (centralized_constant S n 0 h0)
+
+/-- In the linear model, eventual constancy forces distributedDOF = 0. -/
+theorem zero_distributed_of_totalDOF_eventually_constant (S : SolutionArchitecture P)
+    (hconst : IsEventuallyConstant (fun n => totalDOF S n)) :
+    S.distributedDOF = 0 := by
+  by_contra hne
+  have hd : S.distributedDOF > 0 := Nat.pos_of_ne_zero hne
+  rcases hconst with ⟨N, hN⟩
+  have hEq : totalDOF S (N + 1) = totalDOF S N := by
+    exact hN (N + 1) (Nat.le_succ N)
+  have hLt : totalDOF S N < totalDOF S (N + 1) :=
+    distributed_multiplies S N (N + 1) (Nat.lt_succ_self N) hd
+  exact (ne_of_lt hLt) hEq.symm
+
+/-- Saturation criterion for the linear model: iff distributedDOF = 0. -/
+theorem totalDOF_eventually_constant_iff_zero_distributed (S : SolutionArchitecture P) :
+    IsEventuallyConstant (fun n => totalDOF S n) ↔ S.distributedDOF = 0 := by
+  constructor
+  · exact zero_distributed_of_totalDOF_eventually_constant S
+  · exact totalDOF_eventually_constant_of_zero_distributed S
+
+/-- A canonical saturating site-cost function in the generalized model. -/
+def saturatingSiteCost (K : ℕ) (n : ℕ) : ℕ :=
+  if n ≤ K then n else K
+
+/-- Generalized total cost with arbitrary per-site accumulation. -/
+def generalizedTotalDOF (central : ℕ) (siteCost : ℕ → ℕ) (n : ℕ) : ℕ :=
+  central + siteCost n
+
+/-- Saturating site cost is eventually constant. -/
+theorem saturatingSiteCost_eventually_constant (K : ℕ) :
+    IsEventuallyConstant (saturatingSiteCost K) := by
+  refine ⟨K, ?_⟩
+  intro n hn
+  unfold saturatingSiteCost
+  by_cases hle : n ≤ K
+  · have hEq : n = K := Nat.le_antisymm hle hn
+    simp [hle, hEq]
+  · simp [hle]
+
+/-- Generalized total with saturating site cost is eventually constant. -/
+theorem generalizedTotal_with_saturation_eventually_constant (central K : ℕ) :
+    IsEventuallyConstant (fun n => generalizedTotalDOF central (saturatingSiteCost K) n) := by
+  refine ⟨K, ?_⟩
+  intro n hn
+  unfold generalizedTotalDOF saturatingSiteCost
+  by_cases hle : n ≤ K
+  · have hEq : n = K := Nat.le_antisymm hle hn
+    simp [hle, hEq]
+  · simp [hle]
+
+/-- Any linear representation of a saturating cost must have zero slope. -/
+theorem linear_represents_saturating_only_zero_slope (c d K : ℕ)
+    (hrep : ∀ n, c + n * d = generalizedTotalDOF c (saturatingSiteCost K) n) :
+    d = 0 := by
+  have hK : c + K * d = generalizedTotalDOF c (saturatingSiteCost K) K := hrep K
+  have hK1 : c + (K + 1) * d = generalizedTotalDOF c (saturatingSiteCost K) (K + 1) := hrep (K + 1)
+  unfold generalizedTotalDOF saturatingSiteCost at hK hK1
+  have hEq : c + K * d = c + (K + 1) * d := by
+    calc
+      c + K * d = c + K := by simpa using hK
+      _ = c + (K + 1) * d := by
+        have hk : ¬ (K + 1 ≤ K) := Nat.not_succ_le_self K
+        simpa [hk] using hK1.symm
+  have hEq' : c + K * d = c + K * d + d := by
+    simpa [Nat.succ_mul, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hEq
+  omega
+
+/-- Therefore positive-slope linear models cannot realize saturation for all n. -/
+theorem no_positive_slope_linear_represents_saturating (c d K : ℕ)
+    (hd : d > 0) :
+    ¬ (∀ n, c + n * d = generalizedTotalDOF c (saturatingSiteCost K) n) := by
+  intro hrep
+  have hzero : d = 0 := linear_represents_saturating_only_zero_slope c d K hrep
+  exact (Nat.ne_of_gt hd) hzero
+
+end DecisionQuotient.HardnessDistribution

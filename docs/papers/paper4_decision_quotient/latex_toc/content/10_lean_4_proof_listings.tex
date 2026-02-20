@@ -62,14 +62,78 @@ The proof verifies that the utility construction in \texttt{reductionProblem} cr
 The hardness distribution theorems (Section~\ref{sec:simplicity-tax}) are fully formalized:
 
 \begin{verbatim}
-theorem simplicityTax_conservation :
-    simplicityTax P T + (P.requiredAxes inter T.nativeAxes).card
-      = P.requiredAxes.card
+theorem simplicityTax_conservation (P : SpecificationProblem)
+    (S : SolutionArchitecture P) :
+    S.centralDOF + simplicityTax P S ≥ P.intrinsicDOF
+
+theorem simplicityTax_grows (P : SpecificationProblem)
+    (S : SolutionArchitecture P) (n₁ n₂ : ℕ)
+    (hn : n₁ < n₂) (htax : simplicityTax P S > 0) :
+    totalDOF S n₁ < totalDOF S n₂
 
 theorem native_dominates_manual (P : SpecificationProblem) (n : Nat)
     (hn : n > P.intrinsicDOF) :
     totalDOF (nativeTypeSystem P) n < totalDOF (manualApproach P) n
+
+theorem totalDOF_eventually_constant_iff_zero_distributed
+    (S : SolutionArchitecture P) :
+    IsEventuallyConstant (fun n => totalDOF S n) ↔ S.distributedDOF = 0
+
+theorem no_positive_slope_linear_represents_saturating
+    (c d K : ℕ) (hd : d > 0) :
+    ¬ (∀ n, c + n * d = generalizedTotalDOF c (saturatingSiteCost K) n)
 \end{verbatim}
+
+\subsection{Engineering Corollary Mapping}
+
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Paper handle} & \textbf{Lean theorem} & \textbf{Lean file} \\
+\midrule
+\texttt{cor:overmodel-diagnostic-implication} &
+\texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset} &
+\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\texttt{cor:practice-diagnostic} &
+\texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card} &
+\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\texttt{cor:practice-bounded} &
+\texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions} &
+\texttt{DecisionQuotient/Tractability/BoundedActions.lean} \\
+\texttt{cor:practice-structured} &
+\texttt{DecisionQuotient.sufficiency\_poly\_separable} &
+\texttt{DecisionQuotient/Tractability/SeparableUtility.lean} \\
+\texttt{cor:practice-tree} &
+\texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured} &
+\texttt{DecisionQuotient/Tractability/TreeStructure.lean} \\
+\texttt{cor:practice-unstructured} &
+\texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology} &
+\texttt{DecisionQuotient/Reduction\_AllCoords.lean} \\
+\texttt{cor:right-wrong-hardness} &
+\texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\texttt{cor:type-system-threshold} &
+\texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\texttt{cor:gap-externalization} &
+\texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\texttt{cor:gap-minimization-hard} &
+\texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card} &
+\texttt{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\texttt{thm:linear-saturation-iff-zero} &
+\texttt{DecisionQuotient.HardnessDistribution.totalDOF\_eventually\_constant\_iff\_zero\_distributed} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\texttt{thm:generalized-saturation-possible} &
+\texttt{DecisionQuotient.HardnessDistribution.generalizedTotal\_with\_saturation\_eventually\_constant} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\texttt{cor:linear-positive-no-saturation} &
+\texttt{DecisionQuotient.HardnessDistribution.no\_positive\_slope\_linear\_represents\_saturating} &
+\texttt{DecisionQuotient/HardnessDistribution.lean} \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 \subsection{Module Structure}
 

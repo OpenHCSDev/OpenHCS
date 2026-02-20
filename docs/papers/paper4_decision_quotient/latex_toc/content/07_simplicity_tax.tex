@@ -1,8 +1,5 @@
 \section{Corollary: Complexity Conservation}\label{sec:simplicity-tax}
 
-A quantitative consequence of the hardness results: when a model handles fewer dimensions than required, the gap must be paid at each use site.
-In this section, the amortization result is a theorem \emph{inside} this simplicity-tax framework, not a separate construct.
-
 \begin{definition}
 Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The \emph{expressive gap} is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
 \end{definition}
@@ -16,6 +13,7 @@ The \emph{simplicity tax} is the size of the expressive gap:
 
 \begin{theorem}[Conservation]\label{thm:tax-conservation}
 $|\text{Gap}(M, P)| + |R(P) \cap A(M)| = |R(P)|$. The total cannot be reduced---only redistributed between ``handled natively'' and ``handled externally.''
+\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_conservation})}
 \end{theorem}
 
 \begin{theorem}[Linear Growth]\label{thm:tax-grows}
@@ -23,6 +21,7 @@ For $n$ decision sites:
 \[
 \text{TotalExternalWork} = n \times \text{SimplicityTax}(M, P).
 \]
+\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows})}
 \end{theorem}
 
 \begin{theorem}[Amortization]\label{thm:amortization}
@@ -31,10 +30,25 @@ Let $H_{\text{central}}$ be the one-time cost of using a complete model. There e
 n^* = \frac{H_{\text{central}}}{\text{SimplicityTax}(M,P)}
 \]
 such that for $n > n^*$, the complete model has lower total cost.
+\textit{(Lean analogue: \texttt{DecisionQuotient.HardnessDistribution.amortization\_threshold\_native\_manual})}
 \end{theorem}
 
-\begin{corollary}
-Since identifying $R(P)$ is \coNP-complete in the succinct worst case (Theorem~\ref{thm:sufficiency-conp}), exact minimization of the expressive gap is computationally hard without additional structure. Accordingly, a persistent nonzero gap indicates unresolved tractable characterization of relevance, not impossibility of refinement.
+\begin{corollary}[Gap Externalization]\label{cor:gap-externalization}
+If $\text{Gap}(M,P)\neq\emptyset$, then external handling cost scales linearly with the number of decision sites.
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows})}
 \end{corollary}
 
-These results are machine-checked in Lean 4 (\texttt{HardnessDistribution.lean}).
+\begin{proof}
+Under the Section~\ref{sec:hardness-distribution} identification of per-site external work with distributed DOF, this is exactly \texttt{DecisionQuotient.HardnessDistribution.simplicityTax\_grows}.
+\end{proof}
+
+\begin{corollary}[Exact Minimization Criterion]\label{cor:gap-minimization-hard}
+For mechanized Boolean-coordinate instances, ``there exists a sufficient set of size at most $k$'' is equivalent to ``the relevant-coordinate set has cardinality at most $k$.''
+\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card})}
+\end{corollary}
+
+\begin{proof}
+This is \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card}.
+\end{proof}
+
+Appendix~\ref{app:lean} provides theorem statements and module paths for the corresponding Lean formalization.

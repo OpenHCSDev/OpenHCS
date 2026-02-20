@@ -1,14 +1,25 @@
-\section{Informal Corollaries for Software Architecture}\label{sec:implications}
+\section{Applied Corollaries for Software Architecture}\label{sec:implications}
 
-This section states informal corollaries for software architecture derived from the formal model. The complexity results have direct implications for software engineering practice, but the statements in this section are interpretive consequences; machine-checked theorem statements are in Section~\ref{sec:simplicity-tax} and Appendix~\ref{app:lean}. We use Theorem~\ref{thm:overmodel-diagnostic} as the interpretive lens: persistent over-specification is evidence about unresolved boundary characterization in the current representation.
+\begin{proposition}[Model-Scope Firewall]\label{prop:model-scope-firewall}
+The statements in this section are formal consequences of the model assumptions fixed in Sections~\ref{sec:foundations}--\ref{sec:hardness}; they are not empirical claims about systems outside those assumptions.
+\end{proposition}
 
-\subsection{Why Persistent Over-Specification Is Diagnostic}
+\begin{proof}
+Each result below is derived by explicit reference to prior theorems in this paper (Theorems~\ref{thm:overmodel-diagnostic}, \ref{thm:tractable}, \ref{thm:sufficiency-conp}, and \ref{thm:dichotomy}) and therefore has exactly the scope of those premises.
+\end{proof}
 
-The formal statement appears in Section~\ref{sec:engineering-justification}: Theorem~\ref{thm:overmodel-diagnostic}. We do not restate the complexity classification here; this section treats that theorem as a premise and derives architecture-level corollaries. In practice, configuration growth is read as evidence that decision relevance is not yet characterized in a tractable representation.
+\subsection{Over-Specification as Diagnostic Signal}
+
+\begin{corollary}[Persistent Over-Specification]\label{cor:overmodel-diagnostic-implication}
+In the mechanized Boolean-coordinate model, if a coordinate is relevant and omitted from a candidate set $I$, then $I$ is not sufficient.
+\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset})}
+\end{corollary}
+
+\begin{proof}
+This is the contrapositive of \texttt{DecisionQuotient.Sigma2PHardness.sufficient\_iff\_relevant\_subset}.
+\end{proof}
 
 \subsection{Architectural Decision Quotient}
-
-The sufficiency framework suggests a measure for architectural decisions:
 
 \begin{definition}[Architectural Decision Quotient]
 For a software system with configuration space $S$ and behavior space $B$:
@@ -17,32 +28,62 @@ For a software system with configuration space $S$ and behavior space $B$:
 \]
 \end{definition}
 
-High ADQ means the configuration subset $I$ leaves many behaviors achievable---it doesn't constrain the system much. Low ADQ means $I$ strongly constrains behavior.
-
-\begin{proposition}
-Decisions with low ADQ (strongly constraining) require fewer additional decisions to fully specify system behavior.
+\begin{proposition}[ADQ Ordering]\label{prop:adq-ordering}
+For coordinate sets $I,J$ in the same system, if $\mathrm{ADQ}(I) < \mathrm{ADQ}(J)$, then fixing $I$ leaves a strictly smaller achievable-behavior set than fixing $J$.
 \end{proposition}
+
+\begin{proof}
+The denominator $|B|$ is shared. Thus $\mathrm{ADQ}(I) < \mathrm{ADQ}(J)$ is equivalent to a strict inequality between the corresponding achievable-behavior set cardinalities.
+\end{proof}
 
 \subsection{Corollaries for Practice}
 
-\begin{corollary}[Practice-facing corollaries]
-\label{cor:practice-corollaries}
-Within the formal model, the following corollaries hold:
-\begin{enumerate}
-\item \textbf{Treat over-modeling as a diagnostic:} Persistent inclusion of ``extra'' parameters signals unresolved boundary characterization, not automatic irreducibility.
-\item \textbf{Use bounded scenarios:} When the scenario space is small (Proposition~\ref{prop:sufficiency-char}), minimal modeling becomes tractable.
-\item \textbf{Exploit structure:} Tree-structured dependencies, bounded alternatives, and separable utilities admit efficient algorithms.
-\item \textbf{Use heuristics in the unstructured regime:} For general instances outside the tractable classes, exact optimization has worst-case hardness.
-\end{enumerate}
+\begin{corollary}[Cardinality Criterion for Exact Minimization]\label{cor:practice-diagnostic}
+In the mechanized Boolean-coordinate model, existence of a sufficient set of size at most $k$ is equivalent to the relevance set having cardinality at most $k$.
+\textit{(Lean: \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card})}
 \end{corollary}
 
-\begin{proof}[Derivation sketch]
-Items (1) and (4) follow from the hardness theorems in Section~\ref{sec:hardness} and the encoding-regime separation in Theorem~\ref{thm:dichotomy}. Items (2) and (3) follow from the tractable conditions in Theorem~\ref{thm:tractable}.
+\begin{proof}
+Directly from \texttt{DecisionQuotient.Sigma2PHardness.min\_sufficient\_set\_iff\_relevant\_card}.
+\end{proof}
+
+\begin{corollary}[Bounded-Regime Tractability]\label{cor:practice-bounded}
+When the bounded-action or explicit-state conditions of Theorem~\ref{thm:tractable} hold, minimal modeling can be solved in polynomial time in the stated input size.
+\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions})}
+\end{corollary}
+
+\begin{proof}
+This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_bounded\_actions}.
+\end{proof}
+
+\begin{corollary}[Separable-Utility Tractability]\label{cor:practice-structured}
+When utility is separable with explicit factors, sufficiency checking is polynomial in the explicit-state regime.
+\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_separable})}
+\end{corollary}
+
+\begin{proof}
+This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_separable}.
+\end{proof}
+
+\begin{corollary}[Tree-Structured Tractability]\label{cor:practice-tree}
+When utility factors form a tree structure with explicit local factors, sufficiency checking is polynomial in the explicit-state regime.
+\textit{(Lean: \texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured})}
+\end{corollary}
+
+\begin{proof}
+This is the mechanized theorem \texttt{DecisionQuotient.sufficiency\_poly\_tree\_structured}.
+\end{proof}
+
+\begin{corollary}[Mechanized Hard Family]\label{cor:practice-unstructured}
+There is a machine-checked family of reduction instances where, for non-tautological source formulas, every coordinate is relevant ($k^*=n$), exhibiting worst-case boundary complexity.
+\textit{(Lean: \texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology})}
+\end{corollary}
+
+\begin{proof}
+Directly from \texttt{DecisionQuotient.all\_coords\_relevant\_of\_not\_tautology}.
 \end{proof}
 
 \subsection{Hardness Distribution: Right Place vs Wrong Place}\label{sec:hardness-distribution}
-
-A general principle emerges from the complexity results: problem hardness is conserved and is \emph{distributed} across a system in qualitatively different ways.
 
 \begin{definition}[Hardness Distribution]\label{def:hardness-distribution}
 Let $P$ be a problem family under the succinct encoding of Section~\ref{sec:encoding}. In this section, baseline hardness $H(P;n)$ denotes worst-case computational step complexity on instances with $n$ coordinates (equivalently, as a function of succinct input length $L$) in the fixed encoding regime. A \emph{solution architecture} $S$ partitions this baseline hardness into:
@@ -54,7 +95,7 @@ For $n$ use sites, total realized hardness is:
 \[H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)\]
 \end{definition}
 
-\begin{proposition}[Hardness Conservation Principle]\label{def:hardness-conservation}
+\begin{proposition}[Hardness Conservation Principle]\label{prop:hardness-conservation}
 For any problem family $P$ measured by $H(P;n)$ above, any solution architecture $S$ and any number of use sites $n \ge 1$, if $H_{\text{total}}(S)$ is measured in the same worst-case step units over the same input family, then:
 \[
 H_{\text{total}}(S) = H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S) \geq H(P;n).
@@ -71,7 +112,13 @@ The \emph{hardness efficiency} of solution $S$ with $n$ use sites is:
 \[\eta(S, n) = \frac{H_{\text{central}}(S)}{H_{\text{central}}(S) + n \cdot H_{\text{distributed}}(S)}\]
 \end{definition}
 
-High $\eta$ indicates centralized hardness (paid once); low $\eta$ indicates distributed hardness (paid repeatedly).
+\begin{proposition}[Efficiency Interpretation]\label{prop:hardness-efficiency-interpretation}
+For fixed $n$ and positive total hardness, larger $\eta(S,n)$ is equivalent to a larger central share of realized hardness.
+\end{proposition}
+
+\begin{proof}
+From Definition~\ref{def:hardness-efficiency}, $\eta(S,n)$ is exactly the fraction of total realized hardness paid centrally.
+\end{proof}
 
 \begin{theorem}[Centralization Dominance]\label{thm:centralization-dominance}
 For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{\text{distributed}}$ yield:
@@ -86,22 +133,21 @@ For $n > 1$ use sites, solutions with higher $H_{\text{central}}$ and lower $H_{
 (1) follows from the total hardness formula. (2) follows from error site counting. (3) follows from the definition of leverage as $L = \Delta\text{Effect}/\Delta\text{Effort}$.
 \end{proof}
 
-\begin{corollary}[Right Hardness vs Wrong Hardness]\label{cor:right-wrong-hardness}
-A solution exhibits \emph{hardness in the right place} when:
-\begin{itemize}
-\item Hardness is centralized (high $H_{\text{central}}$, low $H_{\text{distributed}}$)
-\item Hardness is paid at design/compile time rather than runtime
-\item Hardness is enforced by tooling (type checker, compiler) rather than convention
-\end{itemize}
-A solution exhibits \emph{hardness in the wrong place} when:
-\begin{itemize}
-\item Hardness is distributed (low $H_{\text{central}}$, high $H_{\text{distributed}}$)
-\item Hardness is paid repeatedly at each use site
-\item Hardness relies on human discipline rather than mechanical enforcement
-\end{itemize}
+\begin{corollary}[Right-Place vs Wrong-Place Hardness]\label{cor:right-wrong-hardness}
+For architectures $S_{\mathrm{right}}, S_{\mathrm{wrong}}$ over the same problem family, if $S_{\mathrm{right}}$ has right hardness, $S_{\mathrm{wrong}}$ has wrong hardness, and $n > H_{\mathrm{central}}(S_{\mathrm{right}})$, then
+\[
+H_{\mathrm{central}}(S_{\mathrm{right}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{right}})
+<
+H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathrm{wrong}}).
+\]
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong})}
 \end{corollary}
 
-\textbf{Example: Type System Instantiation.} Consider a capability $C$ (e.g., provenance tracking) that requires hardness $H(C)$:
+\begin{proof}
+This is the mechanized theorem \texttt{DecisionQuotient.HardnessDistribution.right\_dominates\_wrong}.
+\end{proof}
+
+\textbf{Example (Type System Instantiation).} Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
 
 \begin{center}
 \begin{tabular}{lcc}
@@ -114,11 +160,69 @@ Manual implementation & Low (no new concepts) & High (reimplement per site) \\
 \end{tabular}
 \end{center}
 
-For $n$ use sites, manual implementation costs $n \cdot H_{\text{distributed}}$, growing without bound. Native support costs $H_{\text{central}}$ once, amortized across all uses. The ``simpler'' approach (manual) is only simpler at $n = 1$; for $n > H_{\text{central}}/H_{\text{distributed}}$, native support dominates.
+\begin{corollary}[Type-System Threshold]\label{cor:type-system-threshold}
+For the formal native-vs-manual architecture instance, native support has lower total realized cost for all
+\[
+n > \mathrm{intrinsicDOF}(P).
+\]
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual})}
+\end{corollary}
 
-\begin{remark}[Connection to Decision Quotient]
-The decision quotient (Section~\ref{sec:foundations}) measures which coordinates are decision-relevant. Hardness distribution measures where the cost of \emph{handling} those coordinates is paid. A high-axis system makes relevance explicit (central hardness); a low-axis system requires users to track relevance themselves (distributed hardness).
-\end{remark}
+\begin{proof}
+Immediate from \texttt{DecisionQuotient.HardnessDistribution.native\_dominates\_manual}.
+\end{proof}
+
+\subsection{Extension: Non-Additive Site-Cost Models}\label{sec:nonadditive-site-costs}
+
+\begin{definition}[Generalized Site Accumulation]\label{def:generalized-site-accumulation}
+Let $C_S : \mathbb{N} \to \mathbb{N}$ be a per-site accumulation function for architecture $S$. Define generalized total realized hardness by
+\[
+H_{\text{total}}^{\mathrm{gen}}(S,n) = H_{\text{central}}(S) + C_S(n).
+\]
+\end{definition}
+
+\begin{definition}[Eventual Saturation]\label{def:eventual-saturation}
+A cost function $f : \mathbb{N}\to\mathbb{N}$ is \emph{eventually saturating} if there exists $N$ such that for all $n\ge N$, $f(n)=f(N)$.
+\end{definition}
+
+\begin{theorem}[Linear Model: Saturation iff Zero Distributed Hardness]\label{thm:linear-saturation-iff-zero}
+In the linear model of this section,
+\[
+H_{\text{total}}(S,n)=H_{\text{central}}(S)+n\cdot H_{\text{distributed}}(S),
+\]
+the function $n\mapsto H_{\text{total}}(S,n)$ is eventually saturating if and only if $H_{\text{distributed}}(S)=0$.
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.totalDOF\_eventually\_constant\_iff\_zero\_distributed})}
+\end{theorem}
+
+\begin{proof}
+This is exactly the mechanized equivalence theorem above.
+\end{proof}
+
+\begin{theorem}[Generalized Model: Saturation is Possible]\label{thm:generalized-saturation-possible}
+There exists a generalized site-cost model with eventual saturation. In particular, for
+\[
+C_K(n)=\begin{cases}
+n, & n\le K\\
+K, & n>K,
+\end{cases}
+\]
+both $C_K$ and $n\mapsto H_{\text{central}}+C_K(n)$ are eventually saturating.
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.saturatingSiteCost\_eventually\_constant},
+\texttt{DecisionQuotient.HardnessDistribution.generalizedTotal\_with\_saturation\_eventually\_constant})}
+\end{theorem}
+
+\begin{proof}
+This is the explicit construction mechanized in Lean.
+\end{proof}
+
+\begin{corollary}[Positive Linear Slope Cannot Represent Saturation]\label{cor:linear-positive-no-saturation}
+No positive-slope linear per-site model can represent the saturating family above for all $n$.
+\textit{(Lean: \texttt{DecisionQuotient.HardnessDistribution.no\_positive\_slope\_linear\_represents\_saturating})}
+\end{corollary}
+
+\begin{proof}
+This follows from the mechanized theorem that any linear representation of the saturating family must have zero slope.
+\end{proof}
 
 \paragraph{Mechanized strengthening reference.}
 The strengthened all-coordinates-relevant reduction is presented in Section~\ref{sec:hardness} (``Mechanized strengthening'') and formalized in \texttt{Reduction\_AllCoords.lean} via \texttt{all\_coords\_relevant\_of\_not\_tautology}.
