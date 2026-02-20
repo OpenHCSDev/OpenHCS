@@ -57,7 +57,7 @@ lemma agreeOn_trans {S : Type*} {n : ℕ} [CoordinateSpace S n]
 section SufficiencyCharacterization
 
 variable {A S : Type*} {n : ℕ}
-variable [Fintype A] [Fintype S] [DecidableEq A] [DecidableEq S]
+variable [Fintype A] [Fintype S] [DecidableEq A]
 variable [CoordinateSpace S n]
 
 /-- Finite optimal-action set at a state. -/
@@ -91,6 +91,7 @@ lemma mem_compatibleStates_iff (I : Finset (Fin n)) (s t : S) :
   classical
   simp [compatibleStates]
 
+omit [Fintype S] [DecidableEq A] in
 lemma mem_optFinset_iff (dp : DecisionProblem A S) (s : S) (a : A) :
     a ∈ optFinset dp s ↔ a ∈ dp.Opt s := by
   classical
@@ -198,7 +199,7 @@ theorem sufficiency_iff_dq_ratio (dp : DecisionProblem A S)
       have hsub : optFinset dp s ⊆ projectedOptCover (n := n) dp I s :=
         optFinset_subset_projectedOptCover (n := n) dp I s
       have hcardle : (projectedOptCover (n := n) dp I s).card ≤ (optFinset dp s).card := by
-        simpa [hcard]
+        simp [hcard]
       have hEqSub : optFinset dp s = projectedOptCover (n := n) dp I s :=
         Finset.eq_of_subset_of_card_le hsub hcardle
       exact hEqSub.symm
@@ -210,7 +211,7 @@ end SufficiencyCharacterization
 
 section ADQOrdering
 
-variable {B : Type*} [DecidableEq B]
+variable {B : Type*}
 
 /-- Finite-model ADQ value over a behavior universe `U` and achievable set `X`. -/
 noncomputable def adq (U X : Finset B) : ℚ :=
@@ -325,6 +326,18 @@ end ConditionalComposition
 section ComplexityLifts
 
 open Sigma2PHardness
+
+/-- Named bundle for standard external assumptions used by conditional lift theorems.
+    This keeps assumption tracking explicit when assembling theorem-level closures. -/
+structure StandardComplexityAssumptions
+    (TAUTOLOGY_coNP_complete SUFFICIENCY_in_coNP RelevantCard_coNP
+      RelevantCard_coNP_complete ExistsForallSAT_sigma2p_complete ETH : Prop) : Prop where
+  hTautologyCoNPComplete : TAUTOLOGY_coNP_complete
+  hSufficiencyInCoNP : SUFFICIENCY_in_coNP
+  hRelevantCardCoNP : RelevantCard_coNP
+  hRelevantCardCoNPComplete : RelevantCard_coNP_complete
+  hExistsForallSATSigma2PComplete : ExistsForallSAT_sigma2p_complete
+  hETH : ETH
 
 /-! ### SUFFICIENCY-CHECK (coNP) -/
 

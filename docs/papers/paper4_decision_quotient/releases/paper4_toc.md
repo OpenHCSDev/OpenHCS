@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7060 lines, 310 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7071 lines, 310 theorems
 
 ---
 
@@ -20,7 +20,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7060 lines, 310 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7071 lines, 310 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -77,7 +77,7 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7060 lines, 310 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7071 lines, 310 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -358,7 +358,7 @@ A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if: $$\forall s,
 ## Hardness of SUFFICIENCY-CHECK
 
 ::: theorem
-[]{#thm:sufficiency-conp label="thm:sufficiency-conp"} SUFFICIENCY-CHECK is coNP-complete [@cook1971complexity; @karp1972reducibility]. *(Machine-verified in Lean 4; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}.)*
+[]{#thm:sufficiency-conp label="thm:sufficiency-conp"} SUFFICIENCY-CHECK is coNP-complete [@cook1971complexity; @karp1972reducibility]. *(Lean handles: `ClaimClosure.sufficiency_conp_reduction_core`, `ClaimClosure.sufficiency_conp_complete_conditional`, `tautology_iff_sufficient`.)*
 :::
 
 ::: center
@@ -415,7 +415,7 @@ We formalized a strengthened reduction in Lean 4: given a Boolean formula $\varp
 ## Complexity of MINIMUM-SUFFICIENT-SET
 
 ::: theorem
-[]{#thm:minsuff-conp label="thm:minsuff-conp"} MINIMUM-SUFFICIENT-SET is coNP-complete.
+[]{#thm:minsuff-conp label="thm:minsuff-conp"} MINIMUM-SUFFICIENT-SET is coNP-complete. *(Lean handles: `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_conp_complete_conditional`.)*
 :::
 
 ::: proof
@@ -440,7 +440,7 @@ We also formalize a strengthened variant that fixes the coordinate set and asks 
 :::
 
 ::: theorem
-[]{#thm:anchor-sigma2p label="thm:anchor-sigma2p"} ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete [@stockmeyer1976polynomial] (already for Boolean coordinate spaces).
+[]{#thm:anchor-sigma2p label="thm:anchor-sigma2p"} ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete [@stockmeyer1976polynomial] (already for Boolean coordinate spaces). *(Lean handles: `ClaimClosure.anchor_sigma2p_reduction_core`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `anchor_sufficiency_sigma2p`.)*
 :::
 
 ::: proof
@@ -494,7 +494,7 @@ When $U(a, s) = w_a \cdot s$ for weight vectors $w_a \in \mathbb{Q}^n$, MINIMUM-
 ## Implications
 
 ::: corollary
-Under the succinct encoding, exact minimization of sufficient coordinate sets is coNP-hard via the $k=0$ case, and fixed-anchor minimization is $\Sigma_2^P$-complete. *(Lean handles: `min_sufficient_set_coNP_hard`, `anchor_sufficiency_sigma2p`)*
+Under the succinct encoding, exact minimization of sufficient coordinate sets is coNP-hard via the $k=0$ case, and fixed-anchor minimization is $\Sigma_2^P$-complete. *(Lean handles: `ClaimClosure.minsuff_conp_complete_conditional`, `ClaimClosure.anchor_sigma2p_complete_conditional`)*
 :::
 
 ::: proof
@@ -506,7 +506,7 @@ The modeling budget for deciding what to model is therefore a computationally co
 ## Quantifier Collapse for MINIMUM-SUFFICIENT-SET
 
 ::: theorem
-[]{#thm:minsuff-collapse label="thm:minsuff-collapse"} The apparent second-level predicate $$\exists I \, (|I| \leq k) \; \forall s,s' \in S:\; s_I = s'_I \implies \Opt(s)=\Opt(s')$$ is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where $$\text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \Opt(s)\neq\Opt(s')\}.$$ Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation.
+[]{#thm:minsuff-collapse label="thm:minsuff-collapse"} The apparent second-level predicate $$\exists I \, (|I| \leq k) \; \forall s,s' \in S:\; s_I = s'_I \implies \Opt(s)=\Opt(s')$$ is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where $$\text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \Opt(s)\neq\Opt(s')\}.$$ Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation. *(Lean handles: `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_collapse_to_conp_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`.)*
 :::
 
 ::: proof
@@ -536,6 +536,8 @@ Part 1 is \[E\] (time polynomial in $|S|$). Part 2 is \[S+ETH\] (time exponent
 1.  **\[E\] Explicit-state upper bound:** Under the explicit-state encoding, SUFFICIENCY-CHECK is solvable in time polynomial in $N$ (e.g. $O(N^2|A|)$).
 
 2.  **\[S+ETH\] Succinct lower bound (worst case):** Assuming ETH, there exists a family of succinctly encoded instances with $n$ coordinates and minimal sufficient set size $k^* = n$ such that SUFFICIENCY-CHECK requires time $2^{\Omega(n)}$.
+
+*(Lean handles: `ClaimClosure.dichotomy_conditional`, `ClaimClosure.explicit_state_upper_core`, `ClaimClosure.hard_family_all_coords_core`.)*
 :::
 
 ::: proof
@@ -579,6 +581,8 @@ We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){refer
 2.  **Separable utility (any encoding):** $U(a, s) = f(a) + g(s)$.
 
 3.  **Tree-structured utility with explicit local factors (succinct structured encoding):** There exists a rooted tree on coordinates and local functions $u_i$ such that $$U(a,s) = \sum_i u_i\bigl(a, s_i, s_{\mathrm{parent}(i)}\bigr),$$ with the root term depending only on $(a, s_{\mathrm{root}})$ and all $u_i$ given explicitly as part of the input.
+
+*(Lean handles: `ClaimClosure.tractable_bounded_core`, `ClaimClosure.tractable_separable_core`, `ClaimClosure.tractable_tree_core`, `ClaimClosure.tractable_subcases_conditional`.)*
 :::
 
 ## Explicit-State Encoding
@@ -703,7 +707,7 @@ Assume ETH in the succinct encoding model of Section [\[sec:encoding\]](#sec:en
 
 Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-maintenance asymmetry satisfies: $$C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}$$
 
-Within \[S+ETH\], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. *(Lean asymptotic dominance step: `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`)*
+Within \[S+ETH\], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. *(Lean handles: `ClaimClosure.cost_asymmetry_eth_conditional`, `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`.)*
 :::
 
 ::: proof
@@ -1209,7 +1213,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7060 lines across 42 files, with 310 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7071 lines across 42 files, with 310 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1408,6 +1412,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7060
+- Lines: 7071
 - Theorems: 310
 - `sorry` placeholders: 0

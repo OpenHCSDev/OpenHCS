@@ -103,9 +103,9 @@ theorem sat3_reduction_size_preserving (φ : SAT3Instance) :
 ETH states that 3-SAT on n variables cannot be solved in 2^{o(n)} time. -/
 
 /-- The Exponential Time Hypothesis (stated as an axiom for conditional results) -/
-axiom ETH : ∀ (algorithm : SAT3Instance → Bool),
+axiom ETH : ∀ (_algorithm : SAT3Instance → Bool),
   ∀ (c : ℕ), c > 0 →
-  ∃ (φ : SAT3Instance),
+  ∃ (_φ : SAT3Instance),
     -- The algorithm takes at least 2^{n/c} steps on some instance
     True  -- Placeholder: actual step counting would require a computation model
 
@@ -152,4 +152,3 @@ theorem eth_lower_bound_informal :
     True := trivial
 
 end DecisionQuotient
-

@@ -51,7 +51,10 @@ where $s_I$ denotes the projection of $s$ onto coordinates in $I$.
 
 \begin{theorem}[coNP-completeness of SUFFICIENCY-CHECK]
 \label{thm:sufficiency-conp}
-SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}. \emph{(Machine-verified in Lean 4; see Appendix~\ref{app:lean}.)}
+SUFFICIENCY-CHECK is coNP-complete \cite{cook1971complexity, karp1972reducibility}.
+\textit{(Lean handles: \nolinkurl{ClaimClosure.sufficiency_conp_reduction_core},
+\nolinkurl{ClaimClosure.sufficiency_conp_complete_conditional},
+\nolinkurl{tautology_iff_sufficient}.)}
 \end{theorem}
 
 \begin{center}
@@ -110,6 +113,8 @@ We formalized a strengthened reduction in Lean 4: given a Boolean formula $\varp
 \begin{theorem}[MINIMUM-SUFFICIENT-SET is coNP-complete]
 \label{thm:minsuff-conp}
 MINIMUM-SUFFICIENT-SET is coNP-complete.
+\textit{(Lean handles: \nolinkurl{ClaimClosure.minsuff_collapse_core},
+\nolinkurl{ClaimClosure.minsuff_conp_complete_conditional}.)}
 \end{theorem}
 
 \begin{proof}
@@ -147,6 +152,9 @@ $\text{Opt}(s)$ is constant for all states $s$ with $s_I = \alpha$?
 \begin{theorem}[ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete]
 \label{thm:anchor-sigma2p}
 ANCHOR-SUFFICIENCY is $\Sigma_2^P$-complete \cite{stockmeyer1976polynomial} (already for Boolean coordinate spaces).
+\textit{(Lean handles: \nolinkurl{ClaimClosure.anchor_sigma2p_reduction_core},
+\nolinkurl{ClaimClosure.anchor_sigma2p_complete_conditional},
+\nolinkurl{anchor_sufficiency_sigma2p}.)}
 \end{theorem}
 
 \begin{proof}
@@ -210,8 +218,8 @@ When $U(a, s) = w_a \cdot s$ for weight vectors $w_a \in \mathbb{Q}^n$, MINIMUM-
 
 \begin{corollary}[Computational Bottleneck for Exact Minimization]
 Under the succinct encoding, exact minimization of sufficient coordinate sets is coNP-hard via the $k=0$ case, and fixed-anchor minimization is $\Sigma_2^P$-complete.
-\textit{(Lean handles: \nolinkurl{min_sufficient_set_coNP_hard},
-\nolinkurl{anchor_sufficiency_sigma2p})}
+\textit{(Lean handles: \nolinkurl{ClaimClosure.minsuff_conp_complete_conditional},
+\nolinkurl{ClaimClosure.anchor_sigma2p_complete_conditional})}
 \end{corollary}
 
 \begin{proof}
@@ -233,6 +241,9 @@ is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where
 \text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \Opt(s)\neq\Opt(s')\}.
 \]
 Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation.
+\textit{(Lean handles: \nolinkurl{ClaimClosure.minsuff_collapse_core},
+\nolinkurl{ClaimClosure.minsuff_collapse_to_conp_conditional},
+\nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card}.)}
 \end{theorem}
 
 \begin{proof}

@@ -124,7 +124,7 @@ theorem tractability_conditions_tight :
     (∀ (n : ℕ) (φ : Formula n),
       (reductionProblem φ).isSufficient (∅ : Finset (Fin 1)) ↔ φ.isTautology) ∧
     -- 2. The hard instances have non-separable utility
-    (∀ (n : ℕ) (φ : Formula n) (hnontriv : ∃ a, φ.eval a = false),
+    (∀ (n : ℕ) (φ : Formula n), (∃ a, φ.eval a = false) →
       ¬∃ (av : ReductionAction → ℝ) (sv : ReductionState n → ℝ),
         ∀ a s, reductionUtility φ a s = av a + sv s) ∧
     -- 3. Single action is always tractable (the only tractable bounded case)
@@ -136,4 +136,3 @@ theorem tractability_conditions_tight :
   · intro A S _ dp n _ I; exact single_action_always_sufficient dp I
 
 end DecisionQuotient
-
