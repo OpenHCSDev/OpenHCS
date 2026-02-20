@@ -486,6 +486,36 @@ theorem generalized_right_eventually_dominates_wrong
     centralRight centralWrong B n siteRight siteWrong
     (hRightBound n) (hWrongLowerFrom n hN) hnStrict
 
+/-- Boundary theorem: without wrong-side growth lower bounds, strict dominance is not guaranteed. -/
+theorem generalized_dominance_can_fail_without_wrong_growth :
+    ∃ (centralRight centralWrong : ℕ) (siteRight siteWrong : ℕ → ℕ),
+      (¬ ∀ m, m ≤ siteWrong m) ∧
+      (∀ n, ¬ generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n) := by
+  refine ⟨1, 0, (fun _ => 0), (fun _ => 0), ?_, ?_⟩
+  · intro h
+    exact (Nat.not_succ_le_zero 0) (h 1)
+  · intro n
+    simp [generalizedTotalDOF]
+
+/-- Boundary theorem: without a right-side boundedness assumption,
+    strict dominance is not guaranteed even when wrong-side growth is linear. -/
+theorem generalized_dominance_can_fail_without_right_boundedness :
+    ∃ (centralRight centralWrong : ℕ) (siteRight siteWrong : ℕ → ℕ),
+      (¬ ∃ B, ∀ m, siteRight m ≤ B) ∧
+      (∀ m, m ≤ siteWrong m) ∧
+      (∀ n, ¬ generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n) := by
+  refine ⟨0, 0, (fun m => m + 1), (fun m => m), ?_, ?_, ?_⟩
+  · intro hBound
+    rcases hBound with ⟨B, hB⟩
+    have h : B + 1 + 1 ≤ B := hB (B + 1)
+    omega
+  · intro m
+    exact le_rfl
+  · intro n
+    simp [generalizedTotalDOF]
+
 /-- Saturating site cost is eventually constant. -/
 theorem saturatingSiteCost_eventually_constant (K : ℕ) :
     IsEventuallyConstant (saturatingSiteCost K) := by

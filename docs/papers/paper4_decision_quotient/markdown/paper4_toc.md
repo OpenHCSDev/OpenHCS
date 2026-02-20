@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 6350 lines, 271 theorems
+**Status**: Theory of Computing-ready | **Lean**: 6553 lines, 280 theorems
 
 ---
 
@@ -18,9 +18,9 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$.
 
-The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal interpretive framework that separates structural complexity from representational hardness and yields regime-indexed engineering corollaries.
+The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (6350 lines, 271 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (6553 lines, 280 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -77,15 +77,15 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (6350 lines, 271 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (6553 lines, 280 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
-We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive diagnostic engineering corollaries. Prior work establishes hardness informally; we formalize the constructions and their regime-conditional interpretation.
+We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive theorem-indexed engineering corollaries. Prior work establishes hardness informally; we formalize the constructions and their regime-typed consequences.
 
 ## Paper Structure
 
-The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases stated under explicit encoding assumptions). A second contribution is interpretive but formal: Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"} introduces the structural/representational and integrity/competence splits that type-check the applied corollaries.
+The primary contribution is theoretical: a formalized reduction framework and a complete characterization of the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable cases stated under explicit encoding assumptions). A second contribution is formal claim typing: Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"} introduces the structural/representational and integrity/competence splits that type-check the applied corollaries.
 
 Section [\[sec:foundations\]](#sec:foundations){reference-type="ref" reference="sec:foundations"}: decision-problem foundations and encoding model. Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}: structural vs representational hardness; integrity vs competence. Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}: hardness proofs. Section [\[sec:dichotomy\]](#sec:dichotomy){reference-type="ref" reference="sec:dichotomy"}: regime separation. Section [\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}: tractable cases. Section [\[sec:engineering-justification\]](#sec:engineering-justification){reference-type="ref" reference="sec:engineering-justification"}: engineering corollaries by regime. Section [\[sec:implications\]](#sec:implications){reference-type="ref" reference="sec:implications"}: software architecture corollaries. Section [\[sec:simplicity-tax\]](#sec:simplicity-tax){reference-type="ref" reference="sec:simplicity-tax"}: complexity redistribution corollary. Section [\[sec:related\]](#sec:related){reference-type="ref" reference="sec:related"}: related work. Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}: Lean listings.
 
@@ -631,7 +631,7 @@ All claims in this section are formal corollaries under the declared model assum
 Real engineering problems reduce directly to the decision problems studied in this paper.
 
 ::: theorem
-Configuration Simplification Reduces to SUFFICIENCY-CHECK\] []{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK.
+Configuration Simplification Reduces to SUFFICIENCY-CHECK\] []{#thm:config-reduction label="thm:config-reduction"} Given a software system with configuration parameters $P = \{p_1, \ldots, p_n\}$ and observed behaviors $B = \{b_1, \ldots, b_m\}$, the problem of determining whether parameter subset $I \subseteq P$ preserves all behaviors is equivalent to SUFFICIENCY-CHECK. *(Lean: `ConfigReduction.config_sufficiency_iff_behavior_preserving`)*
 :::
 
 ::: proof
@@ -907,17 +907,19 @@ H_{\mathrm{central}}(S_{\mathrm{wrong}}) + n\,H_{\mathrm{distributed}}(S_{\mathr
 :::
 
 ::: proposition
-[]{#prop:dominance-modes label="prop:dominance-modes"} This section uses two linear-model dominance modes and one generalized nonlinear mode:
+[]{#prop:dominance-modes label="prop:dominance-modes"} This section uses two linear-model dominance modes plus generalized nonlinear dominance and boundary modes:
 
 1.  **Strict threshold dominance:** Corollary [\[cor:right-wrong-hardness\]](#cor:right-wrong-hardness){reference-type="ref" reference="cor:right-wrong-hardness"} gives strict inequality once $n > H_{\mathrm{central}}(S_{\mathrm{right}})$.
 
 2.  **Global weak dominance:** under the decomposition identity used in `HardnessDistribution.centralized_higher_leverage`, centralized hardness placement is never worse for all $n\ge 1$.
 
 3.  **Generalized nonlinear dominance:** under bounded-vs-growing site-cost assumptions (Theorem [\[thm:generalized-dominance\]](#thm:generalized-dominance){reference-type="ref" reference="thm:generalized-dominance"}), right placement strictly dominates beyond a finite threshold without assuming linear per-site cost.
+
+4.  **Generalized boundary mode:** without those growth-separation assumptions, strict dominance is not guaranteed (Proposition [\[prop:generalized-assumption-boundary\]](#prop:generalized-assumption-boundary){reference-type="ref" reference="prop:generalized-assumption-boundary"}).
 :::
 
 ::: proof
-*Proof.* Part (1) is Corollary [\[cor:right-wrong-hardness\]](#cor:right-wrong-hardness){reference-type="ref" reference="cor:right-wrong-hardness"}. Part (2) is exactly `HardnessDistribution.centralized_higher_leverage`. Part (3) is Theorem [\[thm:generalized-dominance\]](#thm:generalized-dominance){reference-type="ref" reference="thm:generalized-dominance"}. ◻
+*Proof.* Part (1) is Corollary [\[cor:right-wrong-hardness\]](#cor:right-wrong-hardness){reference-type="ref" reference="cor:right-wrong-hardness"}. Part (2) is exactly `HardnessDistribution.centralized_higher_leverage`. Part (3) is Theorem [\[thm:generalized-dominance\]](#thm:generalized-dominance){reference-type="ref" reference="thm:generalized-dominance"}. Part (4) is Proposition [\[prop:generalized-assumption-boundary\]](#prop:generalized-assumption-boundary){reference-type="ref" reference="prop:generalized-assumption-boundary"}. ◻
 :::
 
 **Illustrative Instantiation (Type Systems).** Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
@@ -973,6 +975,20 @@ H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).$$ *(Lean: `HardnessDistri
 
 ::: proof
 *Proof.* Immediate from `HardnessDistribution.generalized_right_eventually_dominates_wrong`. ◻
+:::
+
+::: proposition
+[]{#prop:generalized-assumption-boundary label="prop:generalized-assumption-boundary"} In the generalized model, strict right-vs-wrong dominance is not unconditional. There are explicit counterexamples:
+
+1.  If wrong-side growth lower bounds are dropped, right-side strict dominance can fail for all $n$.
+
+2.  If right-side boundedness is dropped, strict dominance can fail for all $n$ even when wrong-side growth is linear.
+
+*(Lean: `HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth`, `HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness`)*
+:::
+
+::: proof
+*Proof.* This is exactly the pair of mechanized boundary theorems listed above. ◻
 :::
 
 ::: theorem
@@ -1136,7 +1152,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
-Beyond classification, the paper contributes an interpretive framework formalized in Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}: structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
+Beyond classification, the paper contributes a formal claim-typing framework (Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}): structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
 
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is -complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with *all coordinates relevant* is also formalized.
 
@@ -1191,7 +1207,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 6350 lines across 40 files, with 271 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 6553 lines across 41 files, with 280 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1278,6 +1294,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `cor:exact-identifiability`                 `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`    `DecisionQuotient/Hardness/Sigma2PHardness.lean`
 
+  `thm:config-reduction`                      `ConfigReduction.config_sufficiency_iff_behavior_preserving`                            `DecisionQuotient/Hardness/ConfigReduction.lean`
+
                                                                                                                                       
 
   `asymmetry-eth`                             `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`                   `DecisionQuotient/HardnessDistribution.lean`
@@ -1349,6 +1367,18 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
   `thm:generalized-dominance`                 `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`   `DecisionQuotient/HardnessDistribution.lean`
 
   `cor:generalized-eventual-dominance`        `HardnessDistribution.generalized_right_eventually_dominates_wrong`                     `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `assumption-`                                                                                                                       
+
+  `boundary (1)`                              `HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth`              `DecisionQuotient/HardnessDistribution.lean`
+
+                                                                                                                                      
+
+  `assumption-`                                                                                                                       
+
+  `boundary (2)`                              `HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness`         `DecisionQuotient/HardnessDistribution.lean`
   -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Module Structure
@@ -1358,6 +1388,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 -   `Sufficiency.lean` -- Sufficiency checking algorithms and properties
 
 -   `Reduction.lean` -- TAUTOLOGY reduction construction and correctness
+
+-   `Hardness/ConfigReduction.lean` -- Sentinel-action configuration reduction theorem
 
 -   `Complexity.lean` -- Polynomial-time reduction definitions using mathlib
 
@@ -1380,6 +1412,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 6350
-- Theorems: 271
+- Lines: 6553
+- Theorems: 280
 - `sorry` placeholders: 0

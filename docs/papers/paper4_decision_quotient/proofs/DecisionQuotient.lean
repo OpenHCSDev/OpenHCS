@@ -9,6 +9,7 @@ import DecisionQuotient.Finite
 import DecisionQuotient.Quotient
 import DecisionQuotient.Sufficiency
 import DecisionQuotient.Hardness
+import DecisionQuotient.Hardness.ConfigReduction
 import DecisionQuotient.Hardness.SAT
 import DecisionQuotient.Hardness.CountingComplexity
 import DecisionQuotient.Hardness.ApproximationHardness

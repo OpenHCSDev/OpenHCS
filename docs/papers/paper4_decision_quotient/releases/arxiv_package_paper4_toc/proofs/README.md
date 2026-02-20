@@ -4,8 +4,8 @@
 
 This directory contains the complete Lean 4 formalization for Decision Quotient (ToC).
 
-- **Lines:** 6350
-- **Theorems:** 271
+- **Lines:** 6553
+- **Theorems:** 280
 - **`sorry` placeholders:** 0
 
 
@@ -36,6 +36,7 @@ lake build
 | `ValueOfInformation.lean` | ValueOfInformation |
 | `Finite.lean` | Finite |
 | `ApproximationHardness.lean` | ApproximationHardness |
+| `ConfigReduction.lean` | ConfigReduction |
 | `CountingComplexity.lean` | CountingComplexity |
 | `CoveringLowerBound.lean` | CoveringLowerBound |
 | `ETH.lean` | ETH |

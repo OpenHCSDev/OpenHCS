@@ -186,16 +186,17 @@ This is the mechanized theorem \nolinkurl{HardnessDistribution.right_dominates_w
 \end{proof}
 
 \begin{proposition}[Dominance Modes]\label{prop:dominance-modes}
-This section uses two linear-model dominance modes and one generalized nonlinear mode:
+This section uses two linear-model dominance modes plus generalized nonlinear dominance and boundary modes:
 \begin{enumerate}
 \item \textbf{Strict threshold dominance:} Corollary~\ref{cor:right-wrong-hardness} gives strict inequality once $n > H_{\mathrm{central}}(S_{\mathrm{right}})$.
 \item \textbf{Global weak dominance:} under the decomposition identity used in \nolinkurl{HardnessDistribution.centralized_higher_leverage}, centralized hardness placement is never worse for all $n\ge 1$.
 \item \textbf{Generalized nonlinear dominance:} under bounded-vs-growing site-cost assumptions (Theorem~\ref{thm:generalized-dominance}), right placement strictly dominates beyond a finite threshold without assuming linear per-site cost.
+\item \textbf{Generalized boundary mode:} without those growth-separation assumptions, strict dominance is not guaranteed (Proposition~\ref{prop:generalized-assumption-boundary}).
 \end{enumerate}
 \end{proposition}
 
 \begin{proof}
-Part (1) is Corollary~\ref{cor:right-wrong-hardness}. Part (2) is exactly \nolinkurl{HardnessDistribution.centralized_higher_leverage}. Part (3) is Theorem~\ref{thm:generalized-dominance}.
+Part (1) is Corollary~\ref{cor:right-wrong-hardness}. Part (2) is exactly \nolinkurl{HardnessDistribution.centralized_higher_leverage}. Part (3) is Theorem~\ref{thm:generalized-dominance}. Part (4) is Proposition~\ref{prop:generalized-assumption-boundary}.
 \end{proof}
 
 \textbf{Illustrative Instantiation (Type Systems).} Consider a capability $C$ (e.g., provenance tracking) with one-time central cost $H_{\text{central}}$ and per-site manual cost $H_{\text{distributed}}$:
@@ -280,6 +281,20 @@ H_{\text{total}}^{\mathrm{gen}}(S_{\mathrm{wrong}},n).
 \begin{proof}
 Immediate from
 \nolinkurl{HardnessDistribution.generalized_right_eventually_dominates_wrong}.
+\end{proof}
+
+\begin{proposition}[Generalized Assumption Boundary]\label{prop:generalized-assumption-boundary}
+In the generalized model, strict right-vs-wrong dominance is not unconditional. There are explicit counterexamples:
+\begin{enumerate}
+\item If wrong-side growth lower bounds are dropped, right-side strict dominance can fail for all $n$.
+\item If right-side boundedness is dropped, strict dominance can fail for all $n$ even when wrong-side growth is linear.
+\end{enumerate}
+\textit{(Lean: \nolinkurl{HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth},
+\nolinkurl{HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness})}
+\end{proposition}
+
+\begin{proof}
+This is exactly the pair of mechanized boundary theorems listed above.
 \end{proof}
 
 \begin{theorem}[Linear Model: Saturation iff Zero Distributed Hardness]\label{thm:linear-saturation-iff-zero}

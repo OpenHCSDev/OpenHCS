@@ -103,6 +103,9 @@ Lean identifiers retain internal naming (\texttt{intrinsicDOF}, \texttt{simplici
 \nolinkurl{cor:exact-identifiability} &
 \nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset} &
 \nolinkurl{DecisionQuotient/Hardness/Sigma2PHardness.lean} \\
+\nolinkurl{thm:config-reduction} &
+\nolinkurl{ConfigReduction.config_sufficiency_iff_behavior_preserving} &
+\nolinkurl{DecisionQuotient/Hardness/ConfigReduction.lean} \\
 \shortstack[l]{\texttt{thm:cost-}\\\texttt{asymmetry-eth}} &
 \nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually} &
 \nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
@@ -178,6 +181,12 @@ Lean identifiers retain internal naming (\texttt{intrinsicDOF}, \texttt{simplici
 \nolinkurl{cor:generalized-eventual-dominance} &
 \nolinkurl{HardnessDistribution.generalized_right_eventually_dominates_wrong} &
 \nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{prop:generalized-}\\\texttt{assumption-}\\\texttt{boundary (1)}} &
+\nolinkurl{HardnessDistribution.generalized_dominance_can_fail_without_wrong_growth} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
+\shortstack[l]{\texttt{prop:generalized-}\\\texttt{assumption-}\\\texttt{boundary (2)}} &
+\nolinkurl{HardnessDistribution.generalized_dominance_can_fail_without_right_boundedness} &
+\nolinkurl{DecisionQuotient/HardnessDistribution.lean} \\
 \bottomrule
 \end{longtable}
 \endgroup
@@ -188,6 +197,7 @@ Lean identifiers retain internal naming (\texttt{intrinsicDOF}, \texttt{simplici
 \item \texttt{Basic.lean} -- Core definitions (DecisionProblem, sufficiency, optimality)
 \item \texttt{Sufficiency.lean} -- Sufficiency checking algorithms and properties
 \item \texttt{Reduction.lean} -- TAUTOLOGY reduction construction and correctness
+\item \texttt{Hardness/ConfigReduction.lean} -- Sentinel-action configuration reduction theorem
 \item \texttt{Complexity.lean} -- Polynomial-time reduction definitions using mathlib
 \item \texttt{HardnessDistribution.lean} -- Simplicity Tax redistribution and amortization theorems
 \item \texttt{IntegrityCompetence.lean} -- Solver integrity vs regime competence separation

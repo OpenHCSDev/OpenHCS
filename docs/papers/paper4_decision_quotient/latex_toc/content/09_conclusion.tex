@@ -28,7 +28,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
 
-Beyond classification, the paper contributes an interpretive framework formalized in Section~\ref{sec:interpretive-foundations}: structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
+Beyond classification, the paper contributes a formal claim-typing framework (Section~\ref{sec:interpretive-foundations}): structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
 
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix~\ref{app:lean} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is \coNP-complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with \emph{all coordinates relevant} is also formalized.
 
