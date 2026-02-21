@@ -60,7 +60,7 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 \textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a separation between explicit-state tractability and succinct worst-case hardness:
 \begin{itemize}
 \item In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
-\item In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for `Opt`-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-state-batch-lb} and \ref{prop:query-subproblem-transfer}, \ref{prop:query-randomized-robustness}).
+\item In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for `Opt`-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:oracle-lattice-strict}).
 \item In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 \end{itemize}
 

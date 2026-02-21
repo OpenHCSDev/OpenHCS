@@ -4,8 +4,8 @@
 
 This directory contains the complete Lean 4 formalization for Decision Quotient (ToC).
 
-- **Lines:** 7741
-- **Theorems:** 350
+- **Lines:** 7990
+- **Theorems:** 361
 - **`sorry` placeholders:** 0
 
 

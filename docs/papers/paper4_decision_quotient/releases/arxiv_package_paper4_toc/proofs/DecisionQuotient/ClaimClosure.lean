@@ -265,6 +265,162 @@ theorem one_step_bridge
     R.isSufficient I ↔ (R.toDecisionProblem).isSufficient I := by
   rfl
 
+/-! ### Bridge-failure witnesses when one-step conditions are dropped -/
+
+private def i0_bridge : Fin 1 := ⟨0, by decide⟩
+private def s0_bridge : Fin 1 → Bool := fun _ => false
+private def s1_bridge : Fin 1 → Bool := fun _ => true
+
+structure TwoStepObjective where
+  immediate : Bool → (Fin 1 → Bool) → ℝ
+  deferred : Bool → (Fin 1 → Bool) → ℝ
+
+def TwoStepObjective.score (R : TwoStepObjective) (a : Bool) (s : Fin 1 → Bool) : ℝ :=
+  R.immediate a s + R.deferred a s
+
+def TwoStepObjective.Opt (R : TwoStepObjective) (s : Fin 1 → Bool) : Set Bool :=
+  { a : Bool | ∀ a' : Bool, R.score a' s ≤ R.score a s }
+
+def TwoStepObjective.toImmediateDecisionProblem (R : TwoStepObjective) :
+    DecisionProblem Bool (Fin 1 → Bool) :=
+  { utility := R.immediate }
+
+def horizonTwoWitness : TwoStepObjective where
+  immediate := fun _ _ => 0
+  deferred := fun a s => if a = s i0_bridge then 1 else 0
+
+theorem horizonTwoWitness_not_empty_sufficient_two_step :
+    ¬ (∀ s s' : Fin 1 → Bool, TwoStepObjective.Opt horizonTwoWitness s =
+      TwoStepObjective.Opt horizonTwoWitness s') := by
+  intro hconst
+  have hEq := hconst s0_bridge s1_bridge
+  have hFalseInS0 : (false : Bool) ∈ TwoStepObjective.Opt horizonTwoWitness s0_bridge := by
+    intro a'
+    cases a' <;> simp [TwoStepObjective.Opt, TwoStepObjective.score, horizonTwoWitness, s0_bridge, i0_bridge]
+  have hFalseNotInS1 : (false : Bool) ∉ TwoStepObjective.Opt horizonTwoWitness s1_bridge := by
+    intro hmem
+    have h := hmem true
+    simp [TwoStepObjective.Opt, TwoStepObjective.score, horizonTwoWitness, s1_bridge, i0_bridge] at h
+    have hcontra : ¬ ((1 : ℝ) ≤ 0) := by norm_num
+    exact hcontra h
+  have hFalseInS1 : (false : Bool) ∈ TwoStepObjective.Opt horizonTwoWitness s1_bridge := by
+    simpa [hEq] using hFalseInS0
+  exact hFalseNotInS1 hFalseInS1
+
+theorem horizonTwoWitness_immediate_empty_sufficient :
+    (horizonTwoWitness.toImmediateDecisionProblem).isSufficient (∅ : Finset (Fin 1)) := by
+  refine (DecisionProblem.emptySet_sufficient_iff_constant
+    (dp := horizonTwoWitness.toImmediateDecisionProblem)).2 ?_
+  intro s s'
+  ext a
+  cases a <;> simp [TwoStepObjective.toImmediateDecisionProblem, horizonTwoWitness, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem horizon_gt_one_bridge_can_fail_on_sufficiency :
+    ¬ (∀ s s' : Fin 1 → Bool,
+      TwoStepObjective.Opt horizonTwoWitness s = TwoStepObjective.Opt horizonTwoWitness s') ∧
+    (horizonTwoWitness.toImmediateDecisionProblem).isSufficient (∅ : Finset (Fin 1)) := by
+  exact ⟨horizonTwoWitness_not_empty_sufficient_two_step, horizonTwoWitness_immediate_empty_sufficient⟩
+
+structure StochasticCriterionObjective where
+  expected : Bool → (Fin 1 → Bool) → ℝ
+  chanceScore : Bool → (Fin 1 → Bool) → ℝ
+
+def StochasticCriterionObjective.OptChance (R : StochasticCriterionObjective)
+    (s : Fin 1 → Bool) : Set Bool :=
+  { a : Bool | ∀ a' : Bool, R.chanceScore a' s ≤ R.chanceScore a s }
+
+def StochasticCriterionObjective.toExpectedDecisionProblem (R : StochasticCriterionObjective) :
+    DecisionProblem Bool (Fin 1 → Bool) :=
+  { utility := R.expected }
+
+def stochasticWitness : StochasticCriterionObjective where
+  expected := fun _ _ => 0
+  chanceScore := fun a s => if a = s i0_bridge then 1 else 0
+
+theorem stochastic_objective_bridge_can_fail_on_sufficiency :
+    ¬ (∀ s s' : Fin 1 → Bool,
+        StochasticCriterionObjective.OptChance stochasticWitness s =
+          StochasticCriterionObjective.OptChance stochasticWitness s') ∧
+    (stochasticWitness.toExpectedDecisionProblem).isSufficient (∅ : Finset (Fin 1)) := by
+  constructor
+  · intro hconst
+    have hEq := hconst s0_bridge s1_bridge
+    have hFalseInS0 :
+        (false : Bool) ∈ StochasticCriterionObjective.OptChance stochasticWitness s0_bridge := by
+      intro a'
+      cases a' <;> simp [StochasticCriterionObjective.OptChance, stochasticWitness, s0_bridge, i0_bridge]
+    have hFalseNotInS1 :
+        (false : Bool) ∉ StochasticCriterionObjective.OptChance stochasticWitness s1_bridge := by
+      intro hmem
+      have h := hmem true
+      simp [StochasticCriterionObjective.OptChance, stochasticWitness, s1_bridge, i0_bridge] at h
+      have hcontra : ¬ ((1 : ℝ) ≤ 0) := by norm_num
+      exact hcontra h
+    have hFalseInS1 :
+        (false : Bool) ∈ StochasticCriterionObjective.OptChance stochasticWitness s1_bridge := by
+      simpa [hEq] using hFalseInS0
+    exact hFalseNotInS1 hFalseInS1
+  · refine (DecisionProblem.emptySet_sufficient_iff_constant
+      (dp := stochasticWitness.toExpectedDecisionProblem)).2 ?_
+    intro s s'
+    ext a
+    cases a <;> simp [StochasticCriterionObjective.toExpectedDecisionProblem, stochasticWitness,
+      DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+structure TransitionCoupledObjective where
+  immediate : Bool → (Fin 1 → Bool) → ℝ
+  transition : Bool → (Fin 1 → Bool) → (Fin 1 → Bool)
+  terminal : (Fin 1 → Bool) → ℝ
+
+def TransitionCoupledObjective.score (R : TransitionCoupledObjective)
+    (a : Bool) (s : Fin 1 → Bool) : ℝ :=
+  R.immediate a s + R.terminal (R.transition a s)
+
+def TransitionCoupledObjective.Opt (R : TransitionCoupledObjective)
+    (s : Fin 1 → Bool) : Set Bool :=
+  { a : Bool | ∀ a' : Bool, R.score a' s ≤ R.score a s }
+
+def TransitionCoupledObjective.toImmediateDecisionProblem (R : TransitionCoupledObjective) :
+    DecisionProblem Bool (Fin 1 → Bool) :=
+  { utility := R.immediate }
+
+def transitionWitness : TransitionCoupledObjective where
+  immediate := fun _ _ => 0
+  transition := fun a s => if a then s else (fun _ => !(s i0_bridge))
+  terminal := fun s => if s i0_bridge then 1 else 0
+
+theorem transition_coupled_bridge_can_fail_on_sufficiency :
+    ¬ (∀ s s' : Fin 1 → Bool,
+        TransitionCoupledObjective.Opt transitionWitness s =
+          TransitionCoupledObjective.Opt transitionWitness s') ∧
+    (transitionWitness.toImmediateDecisionProblem).isSufficient (∅ : Finset (Fin 1)) := by
+  constructor
+  · intro hconst
+    have hEq := hconst s0_bridge s1_bridge
+    have hFalseIn :
+        (false : Bool) ∈ TransitionCoupledObjective.Opt transitionWitness s0_bridge := by
+      intro a'
+      cases a' <;> simp [TransitionCoupledObjective.Opt, TransitionCoupledObjective.score,
+        transitionWitness, s0_bridge, i0_bridge]
+    have hFalseNotIn :
+        (false : Bool) ∉ TransitionCoupledObjective.Opt transitionWitness s1_bridge := by
+      intro hmem
+      have h := hmem true
+      simp [TransitionCoupledObjective.Opt, TransitionCoupledObjective.score,
+        transitionWitness, s1_bridge, i0_bridge] at h
+      have hcontra : ¬ ((1 : ℝ) ≤ 0) := by norm_num
+      exact hcontra h
+    have hFalseInS1 :
+        (false : Bool) ∈ TransitionCoupledObjective.Opt transitionWitness s1_bridge := by
+      simpa [hEq] using hFalseIn
+    exact hFalseNotIn hFalseInS1
+  · refine (DecisionProblem.emptySet_sufficient_iff_constant
+      (dp := transitionWitness.toImmediateDecisionProblem)).2 ?_
+    intro s s'
+    ext a
+    cases a <;> simp [TransitionCoupledObjective.toImmediateDecisionProblem, transitionWitness,
+      DecisionProblem.Opt, DecisionProblem.isOptimal]
+
 end OneStepBridge
 
 /-! ## Over-modeling diagnostic contrapositive in the mechanized Boolean model -/

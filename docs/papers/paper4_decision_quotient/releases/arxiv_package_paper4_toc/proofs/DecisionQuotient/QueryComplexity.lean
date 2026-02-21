@@ -526,6 +526,62 @@ theorem indistinguishable_pair_forces_one_error_per_seed
     decode_error_sum_two_labels b
   simpa [b, hdecode'] using hsum
 
+theorem weighted_seed_error_identity
+    {Ω : Type*} [Fintype Ω] {n : ℕ}
+    (hn : 0 < n) (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool))
+    (decode : Ω → ({s // s ∈ Q} → Set Bool) → Bool)
+    (μ : Ω → ℕ) :
+    ∃ s0 : Fin n → Bool, s0 ∉ Q ∧
+      (let err : Ω → ℕ := fun ω =>
+        (if decode ω (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1) +
+        (if decode ω (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1)
+       ∑ ω : Ω, μ ω * err ω = ∑ ω : Ω, μ ω) := by
+  rcases indistinguishable_pair_forces_one_error_per_seed
+      (Ω := Ω) (n := n) hn Q hQ decode with ⟨s0, hs0_notin, hseed⟩
+  refine ⟨s0, hs0_notin, ?_⟩
+  dsimp
+  calc
+    (∑ ω : Ω, μ ω *
+      ((if decode ω (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1) +
+       (if decode ω (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1))) =
+      ∑ ω : Ω, μ ω * 1 := by
+        refine Finset.sum_congr rfl ?_
+        intro ω hω
+        rw [hseed ω]
+    _ = ∑ ω : Ω, μ ω := by simp
+
+theorem weighted_seed_half_floor
+    {Ω : Type*} [Fintype Ω] {n : ℕ}
+    (hn : 0 < n) (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool))
+    (decode : Ω → ({s // s ∈ Q} → Set Bool) → Bool)
+    (μ : Ω → ℕ) :
+    ∃ s0 : Fin n → Bool, s0 ∉ Q ∧
+      ((∑ ω : Ω, μ ω *
+          (if decode ω (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1)) +
+       (∑ ω : Ω, μ ω *
+          (if decode ω (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1))
+        = ∑ ω : Ω, μ ω) := by
+  rcases weighted_seed_error_identity (Ω := Ω) (n := n) hn Q hQ decode μ with
+    ⟨s0, hs0_notin, hsum⟩
+  refine ⟨s0, hs0_notin, ?_⟩
+  let errYes : Ω → ℕ := fun ω =>
+    if decode ω (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1
+  let errNo : Ω → ℕ := fun ω =>
+    if decode ω (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1
+  have hsplit :
+      (∑ ω : Ω, μ ω * (errYes ω + errNo ω)) =
+      (∑ ω : Ω, μ ω * errYes ω) + (∑ ω : Ω, μ ω * errNo ω) := by
+    simp [errYes, errNo, Nat.mul_add, Finset.sum_add_distrib]
+  have hsum' :
+      (∑ ω : Ω, μ ω * (errYes ω + errNo ω)) = ∑ ω : Ω, μ ω := by
+    simpa [errYes, errNo] using hsum
+  calc
+    (∑ ω : Ω, μ ω * errYes ω) + (∑ ω : Ω, μ ω * errNo ω)
+        = (∑ ω : Ω, μ ω * (errYes ω + errNo ω)) := by simpa [hsplit] using hsplit.symm
+    _ = ∑ ω : Ω, μ ω := hsum'
+
 /-! ## State-batch query model (third intermediate regime)
 
 A state-batch query returns all Boolean-action utilities at a queried state.
@@ -572,6 +628,43 @@ theorem emptySufficiency_stateBatch_indistinguishable_pair {n : ℕ}
   have hs0_notin : s0 ∉ Q := (Finset.mem_sdiff.mp hs0_mem).2
   refine ⟨s0, hs0_notin, ?_, constTrue_empty_sufficient (n := n), spike_empty_not_sufficient (n := n) hn s0⟩
   exact stateBatchView_eq_if_hidden_untouched Q s0 hs0_notin
+
+/-! ## Oracle-lattice transfer and strictness witnesses -/
+
+theorem valueEntryView_eq_of_stateBatchView_eq_on_touched {n : ℕ}
+    (Q : Finset (ValueQueryState n))
+    (dp₁ dp₂ : DecisionProblem Bool (Fin n → Bool))
+    (hBatch :
+      stateBatchView (Q := touchedStates Q) dp₁ = stateBatchView (Q := touchedStates Q) dp₂) :
+    valueEntryView Q dp₁ = valueEntryView Q dp₂ := by
+  funext q
+  have hs_mem : q.1.2 ∈ touchedStates Q := by
+    unfold touchedStates
+    exact Finset.mem_image.mpr ⟨q.1, q.2, rfl⟩
+  have hstate := congrArg (fun f => f ⟨q.1.2, hs_mem⟩) hBatch
+  cases hact : q.1.1
+  · have hsnd := congrArg Prod.snd hstate
+    simpa [valueEntryView, hact] using hsnd
+  · have hfst := congrArg Prod.fst hstate
+    simpa [valueEntryView, hact] using hfst
+
+def scaledTrueProblem {n : ℕ} : DecisionProblem Bool (Fin n → Bool) where
+  utility := fun a _ => if a = true then 2 else 0
+
+theorem scaledTrueProblem_opt {n : ℕ} (s : Fin n → Bool) :
+    (scaledTrueProblem (n := n)).Opt s = {true} := by
+  ext a
+  cases a <;> simp [scaledTrueProblem, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem const_vs_scaled_opt_view_equal {n : ℕ} (Q : Finset (Fin n → Bool)) :
+    oracleView Q (constTrueProblem (n := n)) = oracleView Q (scaledTrueProblem (n := n)) := by
+  apply oracleView_eq_of_agree (Q := Q)
+  intro s hs
+  rw [constTrueProblem_opt (n := n) s, scaledTrueProblem_opt (n := n) s]
+
+theorem const_vs_scaled_value_entry_diff_at_true {n : ℕ} (s0 : Fin n → Bool) :
+    (constTrueProblem (n := n)).utility true s0 ≠ (scaledTrueProblem (n := n)).utility true s0 := by
+  simp [constTrueProblem, scaledTrueProblem]
 
 /-! ## Finite-state generalization of the empty-subproblem obstruction
 

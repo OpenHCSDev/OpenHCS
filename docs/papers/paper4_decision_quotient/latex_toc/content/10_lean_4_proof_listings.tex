@@ -18,6 +18,7 @@ The Lean formalization establishes:
 
 \textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
 The assumptions themselves are unpacked by an explicit ledger projection theorem (\nolinkurl{ClaimClosure.standard_assumption_ledger_unpack}) so dependency tracking is machine-auditable.
+\IfFileExists{content/assumption_ledger_auto.tex}{\input{content/assumption_ledger_auto.tex}}{}
 
 \subsection{Polynomial-Time Reduction Definition}
 
@@ -142,6 +143,15 @@ Strict ordering theorem for shared nonempty behavior denominator. \\
 \nolinkurl{HardnessDistribution.hardnessEfficiency_eq_central_share} & Direct definitional equivalence. \\
 \nolinkurl{prop:integrity-competence-separation} & Full &
 \nolinkurl{IntegrityCompetence.competence_implies_integrity}, \nolinkurl{IntegrityCompetence.integrity_not_competent_of_nonempty_scope} & Direct pair mapping. \\
+\nolinkurl{prop:bridge-failure-horizon} & Full &
+\nolinkurl{ClaimClosure.horizon_gt_one_bridge_can_fail_on_sufficiency}, \nolinkurl{ClaimClosure.horizonTwoWitness_immediate_empty_sufficient} &
+Mechanized counterexample: dropping one-step horizon can break bridge transfer on sufficiency claims. \\
+\nolinkurl{prop:bridge-failure-stochastic} & Full &
+\nolinkurl{ClaimClosure.stochastic_objective_bridge_can_fail_on_sufficiency} &
+Mechanized counterexample: stochastic-criterion optimization can diverge from expected-utility static transfer. \\
+\nolinkurl{prop:bridge-failure-transition} & Full &
+\nolinkurl{ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency} &
+Mechanized counterexample: transition-coupled objective can break static transfer. \\
 \nolinkurl{prop:minimal-relevant-equiv} & Full &
 \nolinkurl{DecisionProblem.minimalSufficient_iff_relevant}, \nolinkurl{DecisionProblem.relevantSet_is_minimal} &
 Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set. \\
@@ -157,6 +167,9 @@ Generic mechanized closure from subproblem hardness to full-problem hardness und
 \nolinkurl{prop:query-randomized-robustness} & Full &
 \nolinkurl{indistinguishable_pair_forces_one_error}, \nolinkurl{indistinguishable_pair_forces_one_error_per_seed}, \nolinkurl{decode_error_sum_two_labels} &
 Seedwise mechanized randomized-robustness closure for indistinguishable yes/no pairs. \\
+\nolinkurl{prop:query-randomized-weighted} & Full &
+\nolinkurl{weighted_seed_error_identity}, \nolinkurl{weighted_seed_half_floor} &
+Weighted finite-support randomized closure: aggregate error mass identity on the hard pair. \\
 \nolinkurl{prop:query-state-batch-lb} & Full &
 \nolinkurl{emptySufficiency_stateBatch_indistinguishable_pair}, \nolinkurl{stateBatchView_eq_if_hidden_untouched} &
 Mechanized state-batch query lower bound via hidden-state indistinguishability. \\
@@ -169,6 +182,12 @@ Mechanized adversary-family tightness witness under full-state scan. \\
 \nolinkurl{prop:query-weighted-transfer} & Full &
 \nolinkurl{weightedQueryCost_ge_min_mul_card}, \nolinkurl{weightedQueryCost_ge_min_mul_of_card_lb} &
 Weighted-query transfer: cardinality lower bounds lift to weighted-cost lower bounds. \\
+\nolinkurl{prop:oracle-lattice-transfer} & Full &
+\nolinkurl{valueEntryView_eq_of_stateBatchView_eq_on_touched} &
+Mechanized oracle-lattice transfer: state-batch agreement implies entry-view agreement on touched states. \\
+\nolinkurl{prop:oracle-lattice-strict} & Full &
+\nolinkurl{const_vs_scaled_opt_view_equal}, \nolinkurl{const_vs_scaled_value_entry_diff_at_true} &
+Mechanized strictness witness: `Opt`-oracle view can hide value-level differences visible to value-entry queries. \\
 \nolinkurl{prop:set-to-selector} & Full &
 \nolinkurl{DecisionProblem.sufficient_implies_selectorSufficient} &
 Set-valued sufficiency implies selector-level sufficiency for any deterministic selector. \\

@@ -246,6 +246,22 @@ If any bridge condition fails, direct transfer from this paper's static complexi
 Beyond Proposition~\ref{prop:one-step-bridge} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.
 \end{remark}
 
+\begin{proposition}[Horizon-$>1$ Bridge-Failure Witness]\label{prop:bridge-failure-horizon}
+Dropping the one-step condition can break sufficiency transfer: there exists a two-step objective where sufficiency in the immediate-utility static projection does not match sufficiency in the two-step objective.
+\textit{(Lean: \nolinkurl{ClaimClosure.horizon_gt_one_bridge_can_fail_on_sufficiency},
+\nolinkurl{ClaimClosure.horizonTwoWitness_immediate_empty_sufficient}.)}
+\end{proposition}
+
+\begin{proposition}[Stochastic-Criterion Bridge-Failure Witness]\label{prop:bridge-failure-stochastic}
+If optimization is performed against a stochastic criterion not equal to deterministic utility maximization, bridge transfer to Definition~\ref{def:decision-problem} can fail even when an expected-utility projection is available.
+\textit{(Lean: \nolinkurl{ClaimClosure.stochastic_objective_bridge_can_fail_on_sufficiency}.)}
+\end{proposition}
+
+\begin{proposition}[Transition-Coupled Bridge-Failure Witness]\label{prop:bridge-failure-transition}
+If post-decision transition effects are objective-relevant, bridge transfer to the static one-step class can fail.
+\textit{(Lean: \nolinkurl{ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency}.)}
+\end{proposition}
+
 \section{Interpretive Foundations: Hardness and Solver Claims}\label{sec:interpretive-foundations}
 
 The claims in later applied sections are theorem-indexed consequences of this section and Sections~\ref{sec:hardness}--\ref{sec:tractable}.

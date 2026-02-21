@@ -79,6 +79,13 @@ Consequently, finite-support randomization does not remove the obstruction: aver
 \nolinkurl{decode_error_sum_two_labels}.)}
 \end{proposition}
 
+\begin{proposition}[Randomized Robustness (Weighted Form)]\label{prop:query-randomized-weighted}
+For any finite-support seed weighting $\mu$, the same hard pair satisfies a weighted identity:
+the weighted sum of yes-error and no-error equals total seed weight. Hence randomization cannot collapse both errors simultaneously.
+\textit{(Lean: \nolinkurl{weighted_seed_error_identity},
+\nolinkurl{weighted_seed_half_floor}.)}
+\end{proposition}
+
 \begin{proposition}[State-Batch Query Lower Bound]\label{prop:query-state-batch-lb}
 In [Q\_bool], the same $\Omega(2^n)$ lower bound holds for a state-batch oracle that returns the full Boolean-action utility tuple at each queried state.
 \textit{(Lean: \nolinkurl{emptySufficiency_stateBatch_indistinguishable_pair},
@@ -104,6 +111,17 @@ Any cardinality lower bound $|Q|\geq L$ lifts to weighted cost:
 \]
 \textit{(Lean: \nolinkurl{weightedQueryCost_ge_min_mul_card},
 \nolinkurl{weightedQueryCost_ge_min_mul_of_card_lb}.)}
+\end{proposition}
+
+\begin{proposition}[Oracle-Lattice Transfer: Batch $\Rightarrow$ Entry]\label{prop:oracle-lattice-transfer}
+In [Q\_bool], agreement on state-batch oracle views over touched states implies agreement on all value-entry views for the corresponding entry-query set.
+\textit{(Lean: \nolinkurl{valueEntryView_eq_of_stateBatchView_eq_on_touched}.)}
+\end{proposition}
+
+\begin{proposition}[Oracle-Lattice Strictness: Opt vs Value Entries]\label{prop:oracle-lattice-strict}
+`Opt`-oracle views are strictly coarser than value-entry views: there exist instances with identical `Opt` views but distinguishable value entries.
+\textit{(Lean witness: \nolinkurl{const_vs_scaled_opt_view_equal},
+\nolinkurl{const_vs_scaled_value_entry_diff_at_true}.)}
 \end{proposition}
 
 \begin{remark}[Instantiation of Definitions~\ref{def:structural-complexity} and~\ref{def:representational-hardness}]

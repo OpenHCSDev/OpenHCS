@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7741 lines, 350 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7990 lines, 361 theorems
 
 ---
 
@@ -16,13 +16,13 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
--   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is seedwise robust under finite-support randomization.
+-   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is robust under finite-support randomization (seedwise and weighted forms), with explicit oracle-lattice transfer/strictness statements.
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7741 lines, 350 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7990 lines, 361 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -75,7 +75,7 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 
 -   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
--   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"} and [\[prop:query-subproblem-transfer\]](#prop:query-subproblem-transfer){reference-type="ref" reference="prop:query-subproblem-transfer"}, [\[prop:query-randomized-robustness\]](#prop:query-randomized-robustness){reference-type="ref" reference="prop:query-randomized-robustness"}).
+-   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}).
 
 -   In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
@@ -95,7 +95,7 @@ The explicit ETH lower bound is still a succinct worst-case statement; Propositi
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7741 lines, 350 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7990 lines, 361 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -322,6 +322,18 @@ If any bridge condition fails, direct transfer from this paper's static complexi
 
 ::: remark
 Beyond Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-type="ref" reference="prop:one-step-bridge"} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.
+:::
+
+::: proposition
+[]{#prop:bridge-failure-horizon label="prop:bridge-failure-horizon"} Dropping the one-step condition can break sufficiency transfer: there exists a two-step objective where sufficiency in the immediate-utility static projection does not match sufficiency in the two-step objective. *(Lean: `ClaimClosure.horizon_gt_one_bridge_can_fail_on_sufficiency`, `ClaimClosure.horizonTwoWitness_immediate_empty_sufficient`.)*
+:::
+
+::: proposition
+[]{#prop:bridge-failure-stochastic label="prop:bridge-failure-stochastic"} If optimization is performed against a stochastic criterion not equal to deterministic utility maximization, bridge transfer to Definition [\[def:decision-problem\]](#def:decision-problem){reference-type="ref" reference="def:decision-problem"} can fail even when an expected-utility projection is available. *(Lean: `ClaimClosure.stochastic_objective_bridge_can_fail_on_sufficiency`.)*
+:::
+
+::: proposition
+[]{#prop:bridge-failure-transition label="prop:bridge-failure-transition"} If post-decision transition effects are objective-relevant, bridge transfer to the static one-step class can fail. *(Lean: `ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency`.)*
 :::
 
 # Interpretive Foundations: Hardness and Solver Claims {#sec:interpretive-foundations}
@@ -709,6 +721,10 @@ Consequently, no deterministic query procedure using fewer than $2^n$ state quer
 :::
 
 ::: proposition
+[]{#prop:query-randomized-weighted label="prop:query-randomized-weighted"} For any finite-support seed weighting $\mu$, the same hard pair satisfies a weighted identity: the weighted sum of yes-error and no-error equals total seed weight. Hence randomization cannot collapse both errors simultaneously. *(Lean: `weighted_seed_error_identity`, `weighted_seed_half_floor`.)*
+:::
+
+::: proposition
 []{#prop:query-state-batch-lb label="prop:query-state-batch-lb"} In \[Q_bool\], the same $\Omega(2^n)$ lower bound holds for a state-batch oracle that returns the full Boolean-action utility tuple at each queried state. *(Lean: `emptySufficiency_stateBatch_indistinguishable_pair`, `stateBatchView_eq_if_hidden_untouched`.)*
 :::
 
@@ -722,6 +738,14 @@ Consequently, no deterministic query procedure using fewer than $2^n$ state quer
 
 ::: proposition
 []{#prop:query-weighted-transfer label="prop:query-weighted-transfer"} Let $w(q)$ be per-query cost and $w_{\min}$ a lower bound on all queried costs. Any cardinality lower bound $|Q|\geq L$ lifts to weighted cost: $$\sum_{q\in Q} w(q)\ \ge\ w_{\min}\cdot L.$$ *(Lean: `weightedQueryCost_ge_min_mul_card`, `weightedQueryCost_ge_min_mul_of_card_lb`.)*
+:::
+
+::: proposition
+[]{#prop:oracle-lattice-transfer label="prop:oracle-lattice-transfer"} In \[Q_bool\], agreement on state-batch oracle views over touched states implies agreement on all value-entry views for the corresponding entry-query set. *(Lean: `valueEntryView_eq_of_stateBatchView_eq_on_touched`.)*
+:::
+
+::: proposition
+[]{#prop:oracle-lattice-strict label="prop:oracle-lattice-strict"} 'Opt'-oracle views are strictly coarser than value-entry views: there exist instances with identical 'Opt' views but distinguishable value entries. *(Lean witness: `const_vs_scaled_opt_view_equal`, `const_vs_scaled_value_entry_diff_at_true`.)*
 :::
 
 ::: remark
@@ -1326,7 +1350,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 -   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
--   Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"}, [\[prop:query-subproblem-transfer\]](#prop:query-subproblem-transfer){reference-type="ref" reference="prop:query-subproblem-transfer"}, [\[prop:query-randomized-robustness\]](#prop:query-randomized-robustness){reference-type="ref" reference="prop:query-randomized-robustness"})
+-   Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness closures (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"})
 
 -   Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"})
 
@@ -1376,7 +1400,7 @@ The practical corollaries are regime-indexed and theorem-indexed:
 
 -   **\[E\] and structured regimes:** polynomial-time exact procedures exist (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
--   **\[Q_bool\] query-access lower bounds:** worst-case full-problem query complexity is $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"}), with subproblem-transfer and randomized-robustness closures.
+-   **\[Q_bool\] query-access lower bounds:** worst-case full-problem query complexity is $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}), with randomized weighted robustness and oracle-lattice closures.
 
 -   **\[S+ETH\] hard families:** exact minimization inherits exponential worst-case cost (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} together with Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
@@ -1389,7 +1413,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7741 lines across 42 files, with 350 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7990 lines across 42 files, with 361 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1514,6 +1538,12 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:integrity-competence-separation`      Full                 `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                                                                                                                                                                                                                                    Direct pair mapping.
 
+  `prop:bridge-failure-horizon`               Full                 `ClaimClosure.horizon_gt_one_bridge_can_fail_on_sufficiency`, `ClaimClosure.horizonTwoWitness_immediate_empty_sufficient`                                                                                                                                                                                                                              Mechanized counterexample: dropping one-step horizon can break bridge transfer on sufficiency claims.
+
+  `prop:bridge-failure-stochastic`            Full                 `ClaimClosure.stochastic_objective_bridge_can_fail_on_sufficiency`                                                                                                                                                                                                                                                                                     Mechanized counterexample: stochastic-criterion optimization can diverge from expected-utility static transfer.
+
+  `prop:bridge-failure-transition`            Full                 `ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency`                                                                                                                                                                                                                                                                                       Mechanized counterexample: transition-coupled objective can break static transfer.
+
   `prop:minimal-relevant-equiv`               Full                 `DecisionProblem.minimalSufficient_iff_relevant`, `DecisionProblem.relevantSet_is_minimal`                                                                                                                                                                                                                                                             Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set.
 
   `prop:query-regime-obstruction`             Full                 `emptySufficiency_query_indistinguishable_pair`, `constTrue_empty_sufficient`, `spike_empty_not_sufficient`, `queryComplexityLowerBound`, `exponential_query_complexity`                                                                                                                                                                               Mechanized Boolean query-regime full lower-bound core (via $I=\emptyset$ indistinguishability) plus obstruction-scale identities.
@@ -1524,6 +1554,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:query-randomized-robustness`          Full                 `indistinguishable_pair_forces_one_error`, `indistinguishable_pair_forces_one_error_per_seed`, `decode_error_sum_two_labels`                                                                                                                                                                                                                           Seedwise mechanized randomized-robustness closure for indistinguishable yes/no pairs.
 
+  `prop:query-randomized-weighted`            Full                 `weighted_seed_error_identity`, `weighted_seed_half_floor`                                                                                                                                                                                                                                                                                             Weighted finite-support randomized closure: aggregate error mass identity on the hard pair.
+
   `prop:query-state-batch-lb`                 Full                 `emptySufficiency_stateBatch_indistinguishable_pair`, `stateBatchView_eq_if_hidden_untouched`                                                                                                                                                                                                                                                          Mechanized state-batch query lower bound via hidden-state indistinguishability.
 
   `prop:query-finite-state-generalization`    Full                 `emptySufficiency_query_indistinguishable_pair_finite`, `spikeFinite_empty_not_sufficient`                                                                                                                                                                                                                                                             Finite-state generalization of the empty-subproblem obstruction core (cardinality $\ge 2$).
@@ -1531,6 +1563,10 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
   `prop:query-tightness-full-scan`            Full                 `full_query_distinguishes_const_spike_finite`                                                                                                                                                                                                                                                                                                          Mechanized adversary-family tightness witness under full-state scan.
 
   `prop:query-weighted-transfer`              Full                 `weightedQueryCost_ge_min_mul_card`, `weightedQueryCost_ge_min_mul_of_card_lb`                                                                                                                                                                                                                                                                         Weighted-query transfer: cardinality lower bounds lift to weighted-cost lower bounds.
+
+  `prop:oracle-lattice-transfer`              Full                 `valueEntryView_eq_of_stateBatchView_eq_on_touched`                                                                                                                                                                                                                                                                                                    Mechanized oracle-lattice transfer: state-batch agreement implies entry-view agreement on touched states.
+
+  `prop:oracle-lattice-strict`                Full                 `const_vs_scaled_opt_view_equal`, `const_vs_scaled_value_entry_diff_at_true`                                                                                                                                                                                                                                                                           Mechanized strictness witness: 'Opt'-oracle view can hide value-level differences visible to value-entry queries.
 
   `prop:set-to-selector`                      Full                 `DecisionProblem.sufficient_implies_selectorSufficient`                                                                                                                                                                                                                                                                                                Set-valued sufficiency implies selector-level sufficiency for any deterministic selector.
 
@@ -1608,6 +1644,39 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake build` in the proof directory to verify.
 
 
+## Assumption Ledger (Auto)
+
+#### Bundle fields in `ClaimClosure.StandardComplexityAssumptions`.
+
+-   `TAUTOLOGY_coNP_complete`
+
+-   `SUFFICIENCY_in_coNP`
+
+-   `RelevantCard_coNP`
+
+-   `RelevantCard_coNP_complete`
+
+-   `ExistsForallSAT_sigma2p_complete`
+
+-   `ETH`
+
+#### Conditional closure handles.
+
+-   `ClaimClosure.anchor_sigma2p_complete_conditional`
+
+-   `ClaimClosure.cost_asymmetry_eth_conditional`
+
+-   `ClaimClosure.dichotomy_conditional`
+
+-   `ClaimClosure.minsuff_collapse_to_conp_conditional`
+
+-   `ClaimClosure.minsuff_conp_complete_conditional`
+
+-   `ClaimClosure.sufficiency_conp_complete_conditional`
+
+-   `ClaimClosure.tractable_subcases_conditional`
+
+
 
 
 ---
@@ -1616,6 +1685,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7741
-- Theorems: 350
+- Lines: 7990
+- Theorems: 361
 - `sorry` placeholders: 0
