@@ -152,12 +152,18 @@ Mechanized counterexample: stochastic-criterion optimization can diverge from ex
 \nolinkurl{prop:bridge-failure-transition} & Full &
 \nolinkurl{ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency} &
 Mechanized counterexample: transition-coupled objective can break static transfer. \\
+\nolinkurl{thm:bridge-boundary-represented} & Full &
+\nolinkurl{ClaimClosure.bridge_transfer_iff_one_step_class}, \nolinkurl{ClaimClosure.bridge_failure_witness_non_one_step}, \nolinkurl{ClaimClosure.bridge_boundary_represented_family} &
+Represented-family boundary closure: transfer licensed iff one-step deterministic, with explicit non-one-step witnesses. \\
 \nolinkurl{prop:minimal-relevant-equiv} & Full &
 \nolinkurl{DecisionProblem.minimalSufficient_iff_relevant}, \nolinkurl{DecisionProblem.relevantSet_is_minimal} &
 Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set. \\
 \nolinkurl{prop:query-regime-obstruction} & Full &
-\nolinkurl{emptySufficiency_query_indistinguishable_pair}, \nolinkurl{constTrue_empty_sufficient}, \nolinkurl{spike_empty_not_sufficient}, \nolinkurl{queryComplexityLowerBound}, \nolinkurl{exponential_query_complexity} &
-Mechanized Boolean query-regime full lower-bound core (via $I=\emptyset$ indistinguishability) plus obstruction-scale identities. \\
+\nolinkurl{ClaimClosure.query_obstruction_finite_state_core}, \nolinkurl{emptySufficiency_query_indistinguishable_pair_finite}, \nolinkurl{spikeFinite_empty_not_sufficient} &
+Finite-state query-regime lower-bound core (arbitrary finite state type, $|S|\ge 2$) via $I=\emptyset$ indistinguishability. \\
+\nolinkurl{cor:query-obstruction-bool} & Full &
+\nolinkurl{ClaimClosure.query_obstruction_boolean_corollary}, \nolinkurl{emptySufficiency_query_indistinguishable_pair} &
+Boolean-coordinate corollary of the finite-state core (recovers $\Omega(2^n)$ bound). \\
 \nolinkurl{prop:query-value-entry-lb} & Full &
 \nolinkurl{emptySufficiency_valueEntry_indistinguishable_pair}, \nolinkurl{valueEntryView_eq_if_hidden_untouched}, \nolinkurl{touchedStates_card_le_query_card} &
 Mechanized Boolean value-entry query lower bound (full problem via $I=\emptyset$ indistinguishability). \\
@@ -221,6 +227,12 @@ Reduction core is mechanized; completeness lift is mechanized as a conditional t
 \nolinkurl{thm:cost-asymmetry-eth} & Full (conditional) &
 \nolinkurl{ClaimClosure.cost_asymmetry_eth_conditional}, \nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually} &
 Asymptotic dominance and ETH-conditioned lift are both mechanized. \\
+\nolinkurl{thm:regime-coverage} & Full &
+\nolinkurl{ClaimClosure.declaredRegimeFamily_complete}, \nolinkurl{ClaimClosure.regime_core_claim_proved} &
+Declared static-class regime family is finite and exhaustive, with one mechanized core claim per regime constructor. \\
+\nolinkurl{thm:typed-completeness-static} & Full (conditional) &
+\nolinkurl{ClaimClosure.typed_static_class_completeness} &
+Typed static-class completeness package: class-label closures + dichotomy closure + regime coverage + family exhaustiveness. \\
 \nolinkurl{thm:dichotomy} & Full (conditional) &
 \nolinkurl{ClaimClosure.dichotomy_conditional}, \nolinkurl{ClaimClosure.hard_family_all_coords_core}, \nolinkurl{ClaimClosure.explicit_state_upper_core} &
 Upper-branch core and hard-family core are mechanized; ETH lower branch is mechanized as conditional transfer. \\

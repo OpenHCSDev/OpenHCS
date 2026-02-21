@@ -9,6 +9,7 @@ This paper characterizes the efficient cases of coordinate sufficiency within th
 
 Section~\ref{sec:encoding} fixes the computational model and input encodings used for all complexity claims.
 Section~\ref{sec:model-contract} gives the model contract and regime tags used to type every strong claim.
+Completeness claims are class-internal: complete for the static sufficiency class fixed by C1--C4 and the declared access regimes. Adjacent objective classes that violate the bridge conditions are typed separately (Section~\ref{sec:model-contract}).
 
 \begin{center}
 \begin{tabularx}{\linewidth}{@{}llX@{}}
@@ -60,11 +61,11 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 \textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a separation between explicit-state tractability and succinct worst-case hardness:
 \begin{itemize}
 \item In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
-\item In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for `Opt`-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:oracle-lattice-strict}).
+\item In the intermediate query-access model: the finite-state core yields an Opt-oracle lower bound $\Omega(|S|)$ (Boolean instantiation: $\Omega(2^n)$), and the mechanized Boolean interface refinements preserve the obstruction for value-entry and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:oracle-lattice-strict}).
 \item In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 \end{itemize}
 
-The explicit ETH lower bound is still a succinct worst-case statement; Propositions~\ref{prop:query-regime-obstruction} and~\ref{prop:query-value-entry-lb} strengthen the intermediate-regime treatment with theorem-level query lower bounds in mechanized Boolean oracle models.
+The explicit ETH lower bound is still a succinct worst-case statement; Proposition~\ref{prop:query-regime-obstruction} provides the finite-state query core and Propositions~\ref{prop:query-value-entry-lb}--\ref{prop:oracle-lattice-strict} provide theorem-level Boolean-interface refinements.
 
 \subsection{Main Theorems}
 
@@ -87,7 +88,7 @@ The explicit ETH lower bound is still a succinct worst-case statement; Propositi
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 \cite{moura2021lean4} (\LeanTotalLines\ lines, \LeanTotalTheorems\ theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 \paragraph{What is new.}
-We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive theorem-indexed engineering corollaries. Prior work establishes hardness informally; we formalize the constructions and their regime-typed consequences.
+We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive theorem-indexed engineering corollaries, including theorem-level typed coverage/completeness closures for the declared static class (Theorems~\ref{thm:regime-coverage}, \ref{thm:typed-completeness-static}). Prior work establishes hardness informally; we formalize the constructions and their regime-typed consequences.
 
 \subsection{Paper Structure}
 

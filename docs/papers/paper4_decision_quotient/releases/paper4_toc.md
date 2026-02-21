@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7990 lines, 361 theorems
+**Status**: Theory of Computing-ready | **Lean**: 8241 lines, 369 theorems
 
 ---
 
@@ -16,13 +16,13 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
--   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is robust under finite-support randomization (seedwise and weighted forms), with explicit oracle-lattice transfer/strictness statements.
+-   **Intermediate query-access lower bounds:** In the finite-state query core, SUFFICIENCY-CHECK has worst-case Opt-oracle query complexity $\Omega(|S|)$ via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem (Boolean instantiation: $\Omega(2^n)$); mechanized Boolean interface refinements show the same obstruction for value-entry and state-batch access, including finite-support randomized robustness and oracle-lattice transfer/strictness statements.
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a coNP characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
-The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
+The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the static sufficiency class defined by the model contract (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7990 lines, 361 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (8241 lines, 369 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -33,7 +33,7 @@ Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \
 
 This paper characterizes the efficient cases of coordinate sufficiency within the formal model:
 
-Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} fixes the computational model and input encodings used for all complexity claims. Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} gives the model contract and regime tags used to type every strong claim.
+Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} fixes the computational model and input encodings used for all complexity claims. Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} gives the model contract and regime tags used to type every strong claim. Completeness claims are class-internal: complete for the static sufficiency class fixed by C1--C4 and the declared access regimes. Adjacent objective classes that violate the bridge conditions are typed separately (Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"}).
 
 ::: center
   **Problem**              **Complexity**              **When Tractable**
@@ -75,11 +75,11 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 
 -   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\operatorname{Opt}(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
--   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}).
+-   In the intermediate query-access model: the finite-state core yields an Opt-oracle lower bound $\Omega(|S|)$ (Boolean instantiation: $\Omega(2^n)$), and the mechanized Boolean interface refinements preserve the obstruction for value-entry and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}).
 
 -   In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
-The explicit ETH lower bound is still a succinct worst-case statement; Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} and [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} strengthen the intermediate-regime treatment with theorem-level query lower bounds in mechanized Boolean oracle models.
+The explicit ETH lower bound is still a succinct worst-case statement; Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} provides the finite-state query core and Propositions [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"} provide theorem-level Boolean-interface refinements.
 
 ## Main Theorems
 
@@ -95,11 +95,11 @@ The explicit ETH lower bound is still a succinct worst-case statement; Propositi
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7990 lines, 361 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (8241 lines, 369 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
-We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive theorem-indexed engineering corollaries. Prior work establishes hardness informally; we formalize the constructions and their regime-typed consequences.
+We contribute (i) formal definitions of decision-theoretic sufficiency in Lean; (ii) machine-checked proofs of reduction correctness for the TAUTOLOGY and $\exists\forall$-SAT reductions; (iii) a complete complexity landscape for coordinate sufficiency with explicit encoding assumptions; and (iv) a formal separation between structural complexity and representational hardness used to derive theorem-indexed engineering corollaries, including theorem-level typed coverage/completeness closures for the declared static class (Theorems [\[thm:regime-coverage\]](#thm:regime-coverage){reference-type="ref" reference="thm:regime-coverage"}, [\[thm:typed-completeness-static\]](#thm:typed-completeness-static){reference-type="ref" reference="thm:typed-completeness-static"}). Prior work establishes hardness informally; we formalize the constructions and their regime-typed consequences.
 
 ## Paper Structure
 
@@ -268,6 +268,8 @@ We use short regime tags for applied corollaries:
 
 -   **\[Q\]** query-access (oracle) regime,
 
+-   **\[Q_fin\]** finite-state query-access core (state-oracle),
+
 -   **\[S\]** succinct encoding,
 
 -   **\[S+ETH\]** succinct encoding with ETH,
@@ -277,6 +279,21 @@ We use short regime tags for applied corollaries:
 -   **\[S_bool\]** mechanized Boolean-coordinate submodel.
 
 This tagging is a claim-typing convention: each strong statement is attached to the regime where it is proven.
+
+::: theorem
+[]{#thm:regime-coverage label="thm:regime-coverage"} Let $$\mathcal{R}_{\mathrm{static}} =
+\{\text{[E]},\ \text{[S+ETH]},\ \text{[Q\_fin:Opt]},\ \text{[Q\_bool:value-entry]},\ \text{[Q\_bool:state-batch]}\}.$$ For each declared regime in $\mathcal{R}_{\mathrm{static}}$, the paper has a theorem-level mechanized core claim. Equivalently, regime typing is complete over the declared static family. *(Lean: `ClaimClosure.declaredRegimeFamily_complete`, `ClaimClosure.regime_core_claim_proved`.)*
+:::
+
+#### Scope Lattice (typed classes and transfer boundary).
+
+::: center
+  **Layer**                                                                             **Transfer Status**           **Lean handles (representative)**
+  ------------------------------------------------------------------------------------- ----------------------------- -------------------------------------------------------------------------------------------------------
+  Static sufficiency class (C1--C4; declared regimes)                                   Internal landscape complete   `ClaimClosure.typed_static_class_completeness`, `ClaimClosure.regime_core_claim_proved`
+  Bridge-admissible adjacent class (one-step deterministic)                             Transfer licensed             `ClaimClosure.one_step_bridge`, `ClaimClosure.bridge_transfer_iff_one_step_class`
+  Non-admissible represented adjacent classes (horizon/stochastic/transition-coupled)   Transfer blocked by witness   `ClaimClosure.bridge_failure_witness_non_one_step`, `ClaimClosure.bridge_boundary_represented_family`
+:::
 
 ## Adjacent Objective Regimes and Bridge
 
@@ -336,6 +353,10 @@ Beyond Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-
 []{#prop:bridge-failure-transition label="prop:bridge-failure-transition"} If post-decision transition effects are objective-relevant, bridge transfer to the static one-step class can fail. *(Lean: `ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency`.)*
 :::
 
+::: theorem
+[]{#thm:bridge-boundary-represented label="thm:bridge-boundary-represented"} Within the represented adjacent family $$\{\text{one-step deterministic},\ \text{horizon-extended},\ \text{stochastic-criterion},\ \text{transition-coupled}\},$$ direct transfer of static sufficiency claims is licensed if and only if the class is one-step deterministic. Each represented non-one-step class has an explicit mechanized bridge-failure witness. *(Lean: `ClaimClosure.bridge_transfer_iff_one_step_class`, `ClaimClosure.bridge_failure_witness_non_one_step`, `ClaimClosure.bridge_boundary_represented_family`.)*
+:::
+
 # Interpretive Foundations: Hardness and Solver Claims {#sec:interpretive-foundations}
 
 The claims in later applied sections are theorem-indexed consequences of this section and Sections [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"}--[\[sec:tractable\]](#sec:tractable){reference-type="ref" reference="sec:tractable"}.
@@ -351,7 +372,21 @@ The claims in later applied sections are theorem-indexed consequences of this se
 :::
 
 ::: remark
-This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics.
+This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics. Accordingly, "complete landscape" means complete for this static sufficiency class under the declared regimes; adjacent objective classes are distinct typed objects, not unproved remainder cases of the same class.
+:::
+
+::: theorem
+[]{#thm:typed-completeness-static label="thm:typed-completeness-static"} For the static sufficiency class fixed by C1--C4 and declared regime family $\mathcal{R}_{\mathrm{static}}$, the paper provides:
+
+1.  conditional class-label closures for SUFFICIENCY-CHECK, MINIMUM-SUFFICIENT-SET, and ANCHOR-SUFFICIENCY;
+
+2.  a conditional explicit/succinct dichotomy closure;
+
+3.  a regime-indexed mechanized core claim for every declared regime; and
+
+4.  declared-family exhaustiveness in the typed regime algebra.
+
+*(Lean package: `ClaimClosure.typed_static_class_completeness`.)*
 :::
 
 ## Solver Integrity and Regime Competence
@@ -654,7 +689,7 @@ The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-typ
 
 #### Model note.
 
-Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} has Part 1 in \[E\] (time polynomial in $|S|$) and Part 2 in \[S+ETH\] (time exponential in $n$). Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} and [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} are \[Q_bool\] (query-count lower bounds for two oracle interfaces). These regimes are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} and are not directly comparable as functions of one numeric input-length parameter.
+Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} has Part 1 in \[E\] (time polynomial in $|S|$) and Part 2 in \[S+ETH\] (time exponential in $n$). Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} is \[Q_fin\] (finite-state Opt-oracle core), while Propositions [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} and [\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"} are \[Q_bool\] interface refinements (value-entry and state-batch). These regimes are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} and are not directly comparable as functions of one numeric input-length parameter.
 
 ::: theorem
 []{#thm:dichotomy label="thm:dichotomy"} Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
@@ -689,7 +724,7 @@ For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomia
 :::
 
 ::: proposition
-[]{#prop:query-regime-obstruction label="prop:query-regime-obstruction"} In the mechanized Boolean query regime \[Q_bool\], fix $n>0$ and let $Q$ be any queried-state set with $|Q|<2^n$. Then there exist two decision problems $\mathcal{D}_{\mathrm{yes}},\mathcal{D}_{\mathrm{no}}$ over the same state space such that:
+[]{#prop:query-regime-obstruction label="prop:query-regime-obstruction"} In the finite-state query regime \[Q_fin\], let $S$ be any finite state type with $|S|\ge 2$ and let $Q\subset S$ with $|Q|<|S|$. Then there exist two decision problems $\mathcal{D}_{\mathrm{yes}},\mathcal{D}_{\mathrm{no}}$ over the same state space such that:
 
 -   their oracle views on all states in $Q$ are identical,
 
@@ -697,11 +732,15 @@ For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomia
 
 -   $\emptyset$ is not sufficient for $\mathcal{D}_{\mathrm{no}}$.
 
-Consequently, no deterministic query procedure using fewer than $2^n$ state queries can solve SUFFICIENCY-CHECK on all such instances; the worst-case query complexity is $\Omega(2^n)$. *(Lean: `emptySufficiency_query_indistinguishable_pair`, `constTrue_empty_sufficient`, `spike_empty_not_sufficient`; obstruction-scale companion: `queryComplexityLowerBound`, `exponential_query_complexity`.)*
+Consequently, no deterministic query procedure using fewer than $|S|$ state queries can solve SUFFICIENCY-CHECK on all such instances; the worst-case query complexity is $\Omega(|S|)$. *(Lean: `ClaimClosure.query_obstruction_finite_state_core`, `emptySufficiency_query_indistinguishable_pair_finite`, `spikeFinite_empty_not_sufficient`.)*
 :::
 
 ::: proof
-*Proof.* The theorem `emptySufficiency_query_indistinguishable_pair` provides, for any $|Q|<2^n$, two oracle-indistinguishable instances with opposite truth values for the $\emptyset$-sufficiency predicate. Since SUFFICIENCY-CHECK contains the $I=\emptyset$ case, any deterministic solver that queries fewer than $2^n$ states cannot be correct on both instances, yielding the $\Omega(2^n)$ worst-case query lower bound in this regime. The scale identities `queryComplexityLowerBound` and `exponential_query_complexity` remain as companion obstruction statements. ◻
+*Proof.* This is exactly the finite-state indistinguishability theorem `ClaimClosure.query_obstruction_finite_state_core`: for any $|Q|<|S|$, there is an unqueried hidden state $s_0$ producing oracle-indistinguishable yes/no instances with opposite truth values on the $I=\emptyset$ subproblem. Since SUFFICIENCY-CHECK contains that subproblem, fewer than $|S|$ queries cannot be correct on both instances, yielding the $\Omega(|S|)$ worst-case lower bound. ◻
+:::
+
+::: corollary
+[]{#cor:query-obstruction-bool label="cor:query-obstruction-bool"} In the Boolean-coordinate state space $S=\{0,1\}^n$, Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} yields the familiar $\Omega(2^n)$ worst-case query lower bound for Opt-oracle access. *(Lean wrapper: `ClaimClosure.query_obstruction_boolean_corollary`; core: `emptySufficiency_query_indistinguishable_pair`.)*
 :::
 
 ::: proposition
@@ -749,10 +788,10 @@ Consequently, no deterministic query procedure using fewer than $2^n$ state quer
 :::
 
 ::: remark
-Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} and Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \operatorname{Opt}(s)$, query access yields $\Omega(2^n)$ lower bounds in mechanized Boolean submodels (for both 'Opt' and value-entry interfaces), and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
+Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} and Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \operatorname{Opt}(s)$, finite-state query access already yields $\Omega(|S|)$ lower bounds at the Opt-oracle level (Boolean instantiation: $\Omega(2^n)$), value-entry/state-batch interfaces preserve the obstruction in \[Q_bool\], and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
 :::
 
-This regime-typed landscape identifies tractability under \[E\], intermediate \[Q_bool\] lower bounds for two oracle interfaces, and worst-case intractability under \[S+ETH\] for the same underlying decision relation.
+This regime-typed landscape identifies tractability under \[E\], a finite-state query lower-bound core under \[Q_fin\] with Boolean interface refinements under \[Q_bool\], and worst-case intractability under \[S+ETH\] for the same underlying decision relation.
 
 
 # Tractable Special Cases: When You Can Solve It {#sec:tractable}
@@ -1350,7 +1389,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 -   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
--   Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness closures (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"})
+-   Full intermediate query-access lower bounds are formalized as a finite-state Opt-oracle core ($\Omega(|S|)$, Boolean instantiation $\Omega(2^n)$) plus Boolean-interface refinements for value-entry and state-batch access, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness closures (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"})
 
 -   Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"})
 
@@ -1368,7 +1407,7 @@ The results provide precise complexity characterizations within the formal model
 
 2.  **Constructive reductions.** The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-3.  **Encoding-regime separation.** Under \[E\], SUFFICIENCY-CHECK is polynomial in $|S|$. Under \[S+ETH\], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under \[Q_bool\], mechanized lower bounds of $\Omega(2^n)$ hold for 'Opt'-oracle, value-entry, and state-batch interfaces (via the $I=\emptyset$ subproblem), with finite-state and weighted-cost transfer closures.
+3.  **Encoding-regime separation.** Under \[E\], SUFFICIENCY-CHECK is polynomial in $|S|$. Under \[S+ETH\], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under \[Q_fin\], the Opt-oracle core has $\Omega(|S|)$ worst-case query complexity (Boolean instantiation $\Omega(2^n)$), and under \[Q_bool\] the value-entry/state-batch refinements preserve the obstruction with weighted-cost transfer closures.
 
 ## The Complexity Redistribution Corollary {#the-complexity-redistribution-corollary .unnumbered}
 
@@ -1384,7 +1423,7 @@ The set identity is elementary; its operational content comes from composition w
 
 ## Open Questions {#open-questions .unnumbered}
 
-Several questions remain for future work:
+The landscape above is complete for the static sufficiency class under C1--C4 and the declared regimes; the items below are adjacent-class extensions or secondary refinements. Several questions remain for future work:
 
 -   **Fixed-parameter tractability (primary):** Is SUFFICIENCY-CHECK FPT when parameterized by the minimal sufficient-set size $k^*$, or is it W\[2\]-hard under this parameterization?
 
@@ -1400,7 +1439,7 @@ The practical corollaries are regime-indexed and theorem-indexed:
 
 -   **\[E\] and structured regimes:** polynomial-time exact procedures exist (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
--   **\[Q_bool\] query-access lower bounds:** worst-case full-problem query complexity is $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}), with randomized weighted robustness and oracle-lattice closures.
+-   **\[Q_fin\]/\[Q_bool\] query-access lower bounds:** worst-case Opt-oracle complexity is $\Omega(|S|)$ in the finite-state core (Boolean instantiation $\Omega(2^n)$), and value-entry/state-batch interfaces satisfy the same obstruction in the mechanized Boolean refinement (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}), with randomized weighted robustness and oracle-lattice closures.
 
 -   **\[S+ETH\] hard families:** exact minimization inherits exponential worst-case cost (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} together with Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
@@ -1413,7 +1452,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7990 lines across 42 files, with 361 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 8241 lines across 42 files, with 369 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1495,9 +1534,9 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
 ## Complete Claim Coverage Matrix
 
-  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   **Paper handle**                            **Status**           **Lean support**                                                                                                                                                                                                                                                                                                                                       **Notes**
-  ------------------------------------------- -------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ -----------------------------------------------------------------------------------------------------------------------------------
+  ------------------------------------------- -------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ ------------------------------------------------------------------------------------------------------------------------------
   `cor:exact-identifiability`                 Full                 `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`                                                                                                                                                                                                                                                                   Direct theorem mapping.
 
   `cor:gap-externalization`                   Full                 `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`, `HardnessDistribution.simplicityTax_grows`                                                                                                                                                                                                                                                  Composite from two mechanized theorems.
@@ -1544,9 +1583,13 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:bridge-failure-transition`            Full                 `ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency`                                                                                                                                                                                                                                                                                       Mechanized counterexample: transition-coupled objective can break static transfer.
 
+  `thm:bridge-boundary-represented`           Full                 `ClaimClosure.bridge_transfer_iff_one_step_class`, `ClaimClosure.bridge_failure_witness_non_one_step`, `ClaimClosure.bridge_boundary_represented_family`                                                                                                                                                                                               Represented-family boundary closure: transfer licensed iff one-step deterministic, with explicit non-one-step witnesses.
+
   `prop:minimal-relevant-equiv`               Full                 `DecisionProblem.minimalSufficient_iff_relevant`, `DecisionProblem.relevantSet_is_minimal`                                                                                                                                                                                                                                                             Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set.
 
-  `prop:query-regime-obstruction`             Full                 `emptySufficiency_query_indistinguishable_pair`, `constTrue_empty_sufficient`, `spike_empty_not_sufficient`, `queryComplexityLowerBound`, `exponential_query_complexity`                                                                                                                                                                               Mechanized Boolean query-regime full lower-bound core (via $I=\emptyset$ indistinguishability) plus obstruction-scale identities.
+  `prop:query-regime-obstruction`             Full                 `ClaimClosure.query_obstruction_finite_state_core`, `emptySufficiency_query_indistinguishable_pair_finite`, `spikeFinite_empty_not_sufficient`                                                                                                                                                                                                         Finite-state query-regime lower-bound core (arbitrary finite state type, $|S|\ge 2$) via $I=\emptyset$ indistinguishability.
+
+  `cor:query-obstruction-bool`                Full                 `ClaimClosure.query_obstruction_boolean_corollary`, `emptySufficiency_query_indistinguishable_pair`                                                                                                                                                                                                                                                    Boolean-coordinate corollary of the finite-state core (recovers $\Omega(2^n)$ bound).
 
   `prop:query-value-entry-lb`                 Full                 `emptySufficiency_valueEntry_indistinguishable_pair`, `valueEntryView_eq_if_hidden_untouched`, `touchedStates_card_le_query_card`                                                                                                                                                                                                                      Mechanized Boolean value-entry query lower bound (full problem via $I=\emptyset$ indistinguishability).
 
@@ -1592,6 +1635,10 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `thm:cost-asymmetry-eth`                    Full (conditional)   `ClaimClosure.cost_asymmetry_eth_conditional`, `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`                                                                                                                                                                                                                                   Asymptotic dominance and ETH-conditioned lift are both mechanized.
 
+  `thm:regime-coverage`                       Full                 `ClaimClosure.declaredRegimeFamily_complete`, `ClaimClosure.regime_core_claim_proved`                                                                                                                                                                                                                                                                  Declared static-class regime family is finite and exhaustive, with one mechanized core claim per regime constructor.
+
+  `thm:typed-completeness-static`             Full (conditional)   `ClaimClosure.typed_static_class_completeness`                                                                                                                                                                                                                                                                                                         Typed static-class completeness package: class-label closures + dichotomy closure + regime coverage + family exhaustiveness.
+
   `thm:dichotomy`                             Full (conditional)   `ClaimClosure.dichotomy_conditional`, `ClaimClosure.hard_family_all_coords_core`, `ClaimClosure.explicit_state_upper_core`                                                                                                                                                                                                                             Upper-branch core and hard-family core are mechanized; ETH lower branch is mechanized as conditional transfer.
 
   `thm:generalized-dominance`                 Full                 `HardnessDistribution.generalized_right_dominates_wrong_of_bounded_vs_identity_lower`                                                                                                                                                                                                                                                                  Direct theorem mapping.
@@ -1613,7 +1660,7 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
   `thm:tax-grows`                             Full                 `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`                                                                                                                                                                                                                                                                                              Direct theorem mapping.
 
   `thm:tractable`                             Full (conditional)   `ClaimClosure.tractable_bounded_core`, `ClaimClosure.tractable_separable_core`, `ClaimClosure.tractable_tree_core`, `ClaimClosure.tractable_subcases_conditional`                                                                                                                                                                                      All three tractable branch cores and assembly closure are mechanized.
-  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Claims Not Fully Mechanized
 
@@ -1685,6 +1732,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7990
-- Theorems: 361
+- Lines: 8241
+- Theorems: 369
 - `sorry` placeholders: 0

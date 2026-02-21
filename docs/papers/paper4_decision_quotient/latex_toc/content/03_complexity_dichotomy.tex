@@ -2,7 +2,7 @@
 
 The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound, and an intermediate query-access obstruction family.
 
-\paragraph{Model note.} Theorem~\ref{thm:dichotomy} has Part~1 in [E] (time polynomial in $|S|$) and Part~2 in [S+ETH] (time exponential in $n$). Propositions~\ref{prop:query-regime-obstruction} and~\ref{prop:query-value-entry-lb} are [Q\_bool] (query-count lower bounds for two oracle interfaces). These regimes are defined in Section~\ref{sec:encoding} and are not directly comparable as functions of one numeric input-length parameter.
+\paragraph{Model note.} Theorem~\ref{thm:dichotomy} has Part~1 in [E] (time polynomial in $|S|$) and Part~2 in [S+ETH] (time exponential in $n$). Proposition~\ref{prop:query-regime-obstruction} is [Q\_fin] (finite-state Opt-oracle core), while Propositions~\ref{prop:query-value-entry-lb} and~\ref{prop:query-state-batch-lb} are [Q\_bool] interface refinements (value-entry and state-batch). These regimes are defined in Section~\ref{sec:encoding} and are not directly comparable as functions of one numeric input-length parameter.
 
 \begin{theorem}[Explicit--Succinct Regime Separation]\label{thm:dichotomy}
 Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
@@ -36,25 +36,30 @@ There is a clean separation between explicit-state tractability and succinct wor
 For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 \end{corollary}
 
-\begin{proposition}[Full Query-Access Lower Bound via Empty-Set Subproblem]\label{prop:query-regime-obstruction}
-In the mechanized Boolean query regime [Q\_bool], fix $n>0$ and let $Q$ be any queried-state set with $|Q|<2^n$.
+\begin{proposition}[Finite-State Query Lower-Bound Core via Empty-Set Subproblem]\label{prop:query-regime-obstruction}
+In the finite-state query regime [Q\_fin], let $S$ be any finite state type with $|S|\ge 2$ and let $Q\subset S$ with $|Q|<|S|$.
 Then there exist two decision problems $\mathcal{D}_{\mathrm{yes}},\mathcal{D}_{\mathrm{no}}$ over the same state space such that:
 \begin{itemize}
 \item their oracle views on all states in $Q$ are identical,
 \item $\emptyset$ is sufficient for $\mathcal{D}_{\mathrm{yes}}$,
 \item $\emptyset$ is not sufficient for $\mathcal{D}_{\mathrm{no}}$.
 \end{itemize}
-Consequently, no deterministic query procedure using fewer than $2^n$ state queries can solve SUFFICIENCY-CHECK on all such instances; the worst-case query complexity is $\Omega(2^n)$.
-\textit{(Lean: \nolinkurl{emptySufficiency_query_indistinguishable_pair},
-\nolinkurl{constTrue_empty_sufficient},
-\nolinkurl{spike_empty_not_sufficient}; obstruction-scale companion:
-\nolinkurl{queryComplexityLowerBound},
-\nolinkurl{exponential_query_complexity}.)}
+Consequently, no deterministic query procedure using fewer than $|S|$ state queries can solve SUFFICIENCY-CHECK on all such instances; the worst-case query complexity is $\Omega(|S|)$.
+\textit{(Lean: \nolinkurl{ClaimClosure.query\_obstruction\_finite\_state\_core},
+\nolinkurl{emptySufficiency_query_indistinguishable_pair_finite},
+\nolinkurl{spikeFinite_empty_not_sufficient}.)}
 \end{proposition}
 
 \begin{proof}
-The theorem \texttt{emptySufficiency\_query\_indistinguishable\_pair} provides, for any $|Q|<2^n$, two oracle-indistinguishable instances with opposite truth values for the $\emptyset$-sufficiency predicate. Since SUFFICIENCY-CHECK contains the $I=\emptyset$ case, any deterministic solver that queries fewer than $2^n$ states cannot be correct on both instances, yielding the $\Omega(2^n)$ worst-case query lower bound in this regime. The scale identities \texttt{queryComplexityLowerBound} and \texttt{exponential\_query\_complexity} remain as companion obstruction statements.
+This is exactly the finite-state indistinguishability theorem
+\texttt{ClaimClosure.query\_obstruction\_finite\_state\_core}: for any $|Q|<|S|$, there is an unqueried hidden state $s_0$ producing oracle-indistinguishable yes/no instances with opposite truth values on the $I=\emptyset$ subproblem. Since SUFFICIENCY-CHECK contains that subproblem, fewer than $|S|$ queries cannot be correct on both instances, yielding the $\Omega(|S|)$ worst-case lower bound.
 \end{proof}
+
+\begin{corollary}[Boolean-Coordinate Instantiation]\label{cor:query-obstruction-bool}
+In the Boolean-coordinate state space $S=\{0,1\}^n$, Proposition~\ref{prop:query-regime-obstruction} yields the familiar $\Omega(2^n)$ worst-case query lower bound for Opt-oracle access.
+\textit{(Lean wrapper: \nolinkurl{ClaimClosure.query\_obstruction\_boolean\_corollary};
+core: \nolinkurl{emptySufficiency_query_indistinguishable_pair}.)}
+\end{corollary}
 
 \begin{proposition}[Value-Entry Query Lower Bound]\label{prop:query-value-entry-lb}
 In the mechanized Boolean value-entry query submodel [Q\_bool], for any deterministic procedure using fewer than $2^n$ value-entry queries $(a,s)\mapsto U(a,s)$, there exist two queried-value-indistinguishable instances with opposite truth values for SUFFICIENCY-CHECK on the $I=\emptyset$ subproblem. Therefore worst-case value-entry query complexity is also $\Omega(2^n)$.
@@ -125,7 +130,7 @@ In [Q\_bool], agreement on state-batch oracle views over touched states implies 
 \end{proposition}
 
 \begin{remark}[Instantiation of Definitions~\ref{def:structural-complexity} and~\ref{def:representational-hardness}]
-Theorem~\ref{thm:dichotomy} and Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-value-entry-lb} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, query access yields $\Omega(2^n)$ lower bounds in mechanized Boolean submodels (for both `Opt` and value-entry interfaces), and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
+Theorem~\ref{thm:dichotomy} and Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-value-entry-lb} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, finite-state query access already yields $\Omega(|S|)$ lower bounds at the Opt-oracle level (Boolean instantiation: $\Omega(2^n)$), value-entry/state-batch interfaces preserve the obstruction in [Q\_bool], and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
 \end{remark}
 
-This regime-typed landscape identifies tractability under [E], intermediate [Q\_bool] lower bounds for two oracle interfaces, and worst-case intractability under [S+ETH] for the same underlying decision relation.
+This regime-typed landscape identifies tractability under [E], a finite-state query lower-bound core under [Q\_fin] with Boolean interface refinements under [Q\_bool], and worst-case intractability under [S+ETH] for the same underlying decision relation.

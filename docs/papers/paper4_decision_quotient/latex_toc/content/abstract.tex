@@ -5,14 +5,14 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 \item \textbf{General case:} SUFFICIENCY-CHECK is \coNP-complete; ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete.
 \item \textbf{Tractable cases:} Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($U = f + g$) under any encoding; and tree-structured utility with explicit local factors.
 \item \textbf{Encoding-regime separation:} Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix~\ref{app:lean}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
-\item \textbf{Intermediate query-access lower bounds:} In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for `Opt`-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is robust under finite-support randomization (seedwise and weighted forms), with explicit oracle-lattice transfer/strictness statements.
+\item \textbf{Intermediate query-access lower bounds:} In the finite-state query core, SUFFICIENCY-CHECK has worst-case Opt-oracle query complexity $\Omega(|S|)$ via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem (Boolean instantiation: $\Omega(2^n)$); mechanized Boolean interface refinements show the same obstruction for value-entry and state-batch access, including finite-support randomized robustness and oracle-lattice transfer/strictness statements.
 \end{itemize}
 
 The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Together, these results answer the question ``when is decision-relevant information identifiable efficiently?'' within the stated regimes.
 At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a \coNP characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$.
 Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
-The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/\(\Sigma_2^P\) completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
+The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the static sufficiency class defined by the model contract (coNP/\(\Sigma_2^P\) completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
 The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (\LeanTotalLines\ lines, \LeanTotalTheorems\ theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix~\ref{app:lean}).
 

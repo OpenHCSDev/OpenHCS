@@ -17,8 +17,9 @@ import DecisionQuotient.Instances
 import DecisionQuotient.Computation
 import DecisionQuotient.Reduction
 import DecisionQuotient.Reduction_AllCoords
-import DecisionQuotient.Hardness
+import DecisionQuotient.QueryComplexity
 import DecisionQuotient.Hardness.Sigma2PHardness
+import DecisionQuotient.Hardness.Sigma2PExhaustive.AnchorSufficiency
 import DecisionQuotient.HardnessDistribution
 import DecisionQuotient.Tractability.BoundedActions
 import DecisionQuotient.Tractability.SeparableUtility
@@ -559,7 +560,7 @@ theorem anchor_sigma2p_reduction_core (φ : ExistsForallFormula) :
     ExistsForallFormula.satisfiable φ ↔
       (qbfProblem (ExistsForallFormula.padUniversal φ)).anchorSufficient
         (xCoords (ExistsForallFormula.padUniversal φ).nx (ExistsForallFormula.padUniversal φ).ny) :=
-  anchor_sufficiency_sigma2p φ
+  exists_forall_iff_anchor_sufficient_padded φ
 
 /-- Conditional \(\Sigma_2^P\)-completeness transfer for ANCHOR-SUFFICIENCY. -/
 theorem anchor_sigma2p_complete_conditional
@@ -573,7 +574,7 @@ theorem anchor_sigma2p_complete_conditional
       Anchor_sigma2p_complete) :
     ExistsForallSAT_sigma2p_complete → Anchor_sigma2p_complete := by
   intro hSrc
-  exact hCompose hSrc (fun φ => anchor_sufficiency_sigma2p φ)
+  exact hCompose hSrc (fun φ => exists_forall_iff_anchor_sufficient_padded φ)
 
 /-! ### Dichotomy and ETH-conditioned lower bound closure -/
 
@@ -670,6 +671,256 @@ theorem tractable_subcases_conditional
   hAssemble hBounded hSeparable hTree
 
 end ComplexityLifts
+
+/-! ## Typed regime coverage and class-completeness closures (`#9`) -/
+
+section TypedCoverage
+
+open Sigma2PHardness
+
+/-- Query interfaces treated in the intermediate access family. -/
+inductive QueryAccessInterface where
+  | optOracle
+  | valueEntry
+  | stateBatch
+  deriving DecidableEq, Repr
+
+/-- Declared static-class access regimes used by theorem-typed claims. -/
+inductive StaticAccessRegime where
+  | explicitState
+  | succinctEth
+  | query (iface : QueryAccessInterface)
+  deriving DecidableEq, Repr
+
+/-- Finite declared regime family used by theorem-level scope typing. -/
+def declaredRegimeFamily : Finset StaticAccessRegime :=
+  { StaticAccessRegime.explicitState,
+    StaticAccessRegime.succinctEth,
+    StaticAccessRegime.query QueryAccessInterface.optOracle,
+    StaticAccessRegime.query QueryAccessInterface.valueEntry,
+    StaticAccessRegime.query QueryAccessInterface.stateBatch }
+
+/-- Exhaustiveness for the declared static-class regime family. -/
+theorem declaredRegimeFamily_complete (r : StaticAccessRegime) :
+    r ∈ declaredRegimeFamily := by
+  cases r with
+  | explicitState =>
+      simp [declaredRegimeFamily]
+  | succinctEth =>
+      simp [declaredRegimeFamily]
+  | query iface =>
+      cases iface <;> simp [declaredRegimeFamily]
+
+/-- Regime-indexed mechanized core claims (one canonical core per regime). -/
+def regimeCoreClaim : StaticAccessRegime → Prop
+  | .explicitState =>
+      ∀ {A S : Type*} [DecidableEq S] [DecidableEq (Set A)]
+        (dp : DecisionProblem A S) (equiv : S → S → Prop) [DecidableRel equiv]
+        (pairs : List (S × S)),
+        (countedCheckPairs dp equiv pairs).steps ≤ pairs.length
+  | .succinctEth =>
+      ∀ {n : ℕ} (φ : Formula n), ¬ φ.isTautology →
+        ∀ i : Fin n, (reductionProblemMany φ).isRelevant i
+  | .query .optOracle =>
+      ∀ {S : Type*} [Fintype S] [DecidableEq S],
+        2 ≤ Fintype.card S →
+        ∀ (Q : Finset S), Q.card < Fintype.card S →
+          ∃ s0 : S,
+            s0 ∉ Q ∧
+            (oracleViewFinite Q (constTrueProblemFinite S) =
+              oracleViewFinite Q (spikeProblemFinite s0)) ∧
+            (constTrueProblemFinite S).isSufficient (∅ : Finset (Fin 1)) ∧
+            ¬ (spikeProblemFinite s0).isSufficient (∅ : Finset (Fin 1))
+  | .query .valueEntry =>
+      ∀ {n : ℕ}, 0 < n →
+        ∀ (Q : Finset (ValueQueryState n)),
+          Q.card < Fintype.card (Fin n → Bool) →
+            ∃ s0 : Fin n → Bool,
+              s0 ∉ touchedStates Q ∧
+              (valueEntryView Q (constTrueProblem (n := n)) =
+                valueEntryView Q (spikeProblem (n := n) s0)) ∧
+              (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+              ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n))
+  | .query .stateBatch =>
+      ∀ {n : ℕ}, 0 < n →
+        ∀ (Q : Finset (StateBatchQuery n)),
+          Q.card < Fintype.card (Fin n → Bool) →
+            ∃ s0 : Fin n → Bool,
+              s0 ∉ Q ∧
+              (stateBatchView Q (constTrueProblem (n := n)) =
+                stateBatchView Q (spikeProblem (n := n) s0)) ∧
+              (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+              ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n))
+
+/-- Regime-indexed coverage theorem: every declared regime has a mechanized core claim. -/
+theorem regime_core_claim_proved :
+    ∀ r : StaticAccessRegime, regimeCoreClaim r := by
+  intro r
+  cases r with
+  | explicitState =>
+      intro A S _ _ dp equiv _ pairs
+      exact explicit_state_upper_core dp equiv pairs
+  | succinctEth =>
+      intro n φ hnt i
+      exact hard_family_all_coords_core φ hnt i
+  | query iface =>
+      cases iface with
+      | optOracle =>
+          intro S _ _ hCard Q hQ
+          exact emptySufficiency_query_indistinguishable_pair_finite hCard Q hQ
+      | valueEntry =>
+          intro n hn Q hQ
+          exact emptySufficiency_valueEntry_indistinguishable_pair hn Q hQ
+      | stateBatch =>
+          intro n hn Q hQ
+          exact emptySufficiency_stateBatch_indistinguishable_pair hn Q hQ
+
+/-- Explicit finite-state (finite-alphabet) query-obstruction wrapper used in prose typing. -/
+theorem query_obstruction_finite_state_core
+    {S : Type*} [Fintype S] [DecidableEq S]
+    (hCard : 2 ≤ Fintype.card S)
+    (Q : Finset S) (hQ : Q.card < Fintype.card S) :
+    ∃ s0 : S,
+      s0 ∉ Q ∧
+      (oracleViewFinite Q (constTrueProblemFinite S) =
+        oracleViewFinite Q (spikeProblemFinite s0)) ∧
+      (constTrueProblemFinite S).isSufficient (∅ : Finset (Fin 1)) ∧
+      ¬ (spikeProblemFinite s0).isSufficient (∅ : Finset (Fin 1)) :=
+  emptySufficiency_query_indistinguishable_pair_finite hCard Q hQ
+
+/-- Boolean-coordinate corollary wrapper of the finite-state query-obstruction core. -/
+theorem query_obstruction_boolean_corollary
+    {n : ℕ} (hn : 0 < n)
+    (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool)) :
+    ∃ s0 : Fin n → Bool,
+      s0 ∉ Q ∧
+      (oracleView Q (constTrueProblem (n := n)) =
+        oracleView Q (spikeProblem (n := n) s0)) ∧
+      (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+      ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n)) :=
+  emptySufficiency_query_indistinguishable_pair hn Q hQ
+
+/-- Typed class-completeness closure for the static sufficiency class:
+conditional lifts for class labels + regime-indexed mechanized cores +
+declared regime-family exhaustiveness. -/
+theorem typed_static_class_completeness
+    {n : ℕ}
+    {TAUTOLOGY_coNP_complete SUFFICIENCY_in_coNP SUFFICIENCY_coNP_complete : Prop}
+    {RelevantCard_coNP_complete MSS_coNP_complete : Prop}
+    {ExistsForallSAT_sigma2p_complete Anchor_sigma2p_complete : Prop}
+    {ETH ExplicitStateUpperBound SuccinctETHLowerBound : Prop}
+    (hIn : SUFFICIENCY_in_coNP)
+    (hSuffCompose :
+      TAUTOLOGY_coNP_complete → SUFFICIENCY_in_coNP →
+      (∀ φ : Formula n,
+        (reductionProblem φ).isSufficient (∅ : Finset (Fin 1)) ↔ φ.isTautology) →
+      SUFFICIENCY_coNP_complete)
+    (hMssCompose :
+      RelevantCard_coNP_complete →
+      (∀ (A : Type*) (n : ℕ) (dp : DecisionProblem A (Fin n → Bool)) (k : ℕ),
+        (∃ I : Finset (Fin n), I.card ≤ k ∧ dp.isSufficient I) ↔
+          (relevantFinset dp).card ≤ k) →
+      MSS_coNP_complete)
+    (hAnchorCompose :
+      ExistsForallSAT_sigma2p_complete →
+      (∀ φ : ExistsForallFormula,
+        ExistsForallFormula.satisfiable φ ↔
+          (qbfProblem (ExistsForallFormula.padUniversal φ)).anchorSufficient
+            (xCoords (ExistsForallFormula.padUniversal φ).nx (ExistsForallFormula.padUniversal φ).ny)) →
+      Anchor_sigma2p_complete)
+    (hExplicit : ExplicitStateUpperBound)
+    (hEthTransfer :
+      ETH →
+      (∀ {n : ℕ} (φ : Formula n), ¬ φ.isTautology →
+        ∀ i : Fin n, (reductionProblemMany φ).isRelevant i) →
+      SuccinctETHLowerBound) :
+    (TAUTOLOGY_coNP_complete → SUFFICIENCY_coNP_complete) ∧
+    (RelevantCard_coNP_complete → MSS_coNP_complete) ∧
+    (ExistsForallSAT_sigma2p_complete → Anchor_sigma2p_complete) ∧
+    (ETH → (ExplicitStateUpperBound ∧ SuccinctETHLowerBound)) ∧
+    (∀ r : StaticAccessRegime, regimeCoreClaim r) ∧
+    (∀ r : StaticAccessRegime, r ∈ declaredRegimeFamily) := by
+  refine ⟨?_, ?_, ?_, ?_, regime_core_claim_proved, declaredRegimeFamily_complete⟩
+  · intro hT
+    exact sufficiency_conp_complete_conditional (n := n) hIn hSuffCompose hT
+  · intro hCard
+    exact minsuff_conp_complete_conditional hMssCompose hCard
+  · intro hSrc
+    exact anchor_sigma2p_complete_conditional hAnchorCompose hSrc
+  · intro hEth
+    exact dichotomy_conditional hExplicit hEthTransfer hEth
+
+end TypedCoverage
+
+/-! ## Bridge boundary closure in the represented adjacent family (`#10`) -/
+
+section BridgeBoundary
+
+/-- Typed adjacent classes represented in the bridge section. -/
+inductive BridgeTypedClass where
+  | oneStepDeterministic
+  | horizonExtended
+  | stochasticCriterion
+  | transitionCoupled
+  deriving DecidableEq, Repr
+
+/-- License predicate: only one-step deterministic class supports direct static transfer. -/
+def bridgeTransferLicensed : BridgeTypedClass → Prop
+  | .oneStepDeterministic => True
+  | .horizonExtended => False
+  | .stochasticCriterion => False
+  | .transitionCoupled => False
+
+/-- Exact boundary in the represented adjacent family: transfer is licensed iff one-step. -/
+theorem bridge_transfer_iff_one_step_class (c : BridgeTypedClass) :
+    bridgeTransferLicensed c ↔ c = BridgeTypedClass.oneStepDeterministic := by
+  cases c <;> simp [bridgeTransferLicensed]
+
+/-- Non-one-step classes carry explicit mechanized failure witnesses. -/
+def bridgeFailureWitness : BridgeTypedClass → Prop
+  | .oneStepDeterministic => False
+  | .horizonExtended =>
+      ¬ (∀ s s' : Fin 1 → Bool,
+        TwoStepObjective.Opt horizonTwoWitness s = TwoStepObjective.Opt horizonTwoWitness s') ∧
+      (horizonTwoWitness.toImmediateDecisionProblem).isSufficient (∅ : Finset (Fin 1))
+  | .stochasticCriterion =>
+      ¬ (∀ s s' : Fin 1 → Bool,
+        StochasticCriterionObjective.OptChance stochasticWitness s =
+          StochasticCriterionObjective.OptChance stochasticWitness s') ∧
+      (stochasticWitness.toExpectedDecisionProblem).isSufficient (∅ : Finset (Fin 1))
+  | .transitionCoupled =>
+      ¬ (∀ s s' : Fin 1 → Bool,
+        TransitionCoupledObjective.Opt transitionWitness s =
+          TransitionCoupledObjective.Opt transitionWitness s') ∧
+      (transitionWitness.toImmediateDecisionProblem).isSufficient (∅ : Finset (Fin 1))
+
+/-- Every represented non-one-step class has a concrete bridge-failure witness. -/
+theorem bridge_failure_witness_non_one_step
+    (c : BridgeTypedClass) (hc : c ≠ BridgeTypedClass.oneStepDeterministic) :
+    bridgeFailureWitness c := by
+  cases c with
+  | oneStepDeterministic =>
+      cases hc rfl
+  | horizonExtended =>
+      simpa [bridgeFailureWitness] using horizon_gt_one_bridge_can_fail_on_sufficiency
+  | stochasticCriterion =>
+      simpa [bridgeFailureWitness] using stochastic_objective_bridge_can_fail_on_sufficiency
+  | transitionCoupled =>
+      simpa [bridgeFailureWitness] using transition_coupled_bridge_can_fail_on_sufficiency
+
+/-- Packaged represented-family boundary result used by theorem-typed prose. -/
+theorem bridge_boundary_represented_family :
+    bridgeTransferLicensed BridgeTypedClass.oneStepDeterministic ∧
+    bridgeFailureWitness BridgeTypedClass.horizonExtended ∧
+    bridgeFailureWitness BridgeTypedClass.stochasticCriterion ∧
+    bridgeFailureWitness BridgeTypedClass.transitionCoupled := by
+  refine ⟨by simp [bridgeTransferLicensed], ?_, ?_, ?_⟩
+  · simpa [bridgeFailureWitness] using horizon_gt_one_bridge_can_fail_on_sufficiency
+  · simpa [bridgeFailureWitness] using stochastic_objective_bridge_can_fail_on_sufficiency
+  · simpa [bridgeFailureWitness] using transition_coupled_bridge_can_fail_on_sufficiency
+
+end BridgeBoundary
 
 /-! ## Subproblem-to-full transfer closure (`#2`) -/
 

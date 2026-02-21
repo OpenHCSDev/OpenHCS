@@ -195,6 +195,7 @@ We use short regime tags for applied corollaries:
 \begin{itemize}
 \item \textbf{[E]} explicit-state encoding,
 \item \textbf{[Q]} query-access (oracle) regime,
+\item \textbf{[Q\_fin]} finite-state query-access core (state-oracle),
 \item \textbf{[S]} succinct encoding,
 \item \textbf{[S+ETH]} succinct encoding with ETH,
 \item \textbf{[Q\_bool]} mechanized Boolean query submodel,
@@ -202,6 +203,30 @@ We use short regime tags for applied corollaries:
 \end{itemize}
 
 This tagging is a claim-typing convention: each strong statement is attached to the regime where it is proven.
+
+\begin{theorem}[Declared Regime Coverage for the Static Class]\label{thm:regime-coverage}
+Let
+\[
+\mathcal{R}_{\mathrm{static}} =
+\{\text{[E]},\ \text{[S+ETH]},\ \text{[Q\_fin:Opt]},\ \text{[Q\_bool:value-entry]},\ \text{[Q\_bool:state-batch]}\}.
+\]
+For each declared regime in $\mathcal{R}_{\mathrm{static}}$, the paper has a theorem-level mechanized core claim. Equivalently, regime typing is complete over the declared static family.
+\textit{(Lean: \nolinkurl{ClaimClosure.declaredRegimeFamily\_complete},
+\nolinkurl{ClaimClosure.regime\_core\_claim\_proved}.)}
+\end{theorem}
+
+\paragraph{Scope Lattice (typed classes and transfer boundary).}
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+\textbf{Layer} & \textbf{Transfer Status} & \textbf{Lean handles (representative)} \\
+\midrule
+Static sufficiency class (C1--C4; declared regimes) & Internal landscape complete & \nolinkurl{ClaimClosure.typed\_static\_class\_completeness}, \nolinkurl{ClaimClosure.regime\_core\_claim\_proved} \\
+Bridge-admissible adjacent class (one-step deterministic) & Transfer licensed & \nolinkurl{ClaimClosure.one\_step\_bridge}, \nolinkurl{ClaimClosure.bridge\_transfer\_iff\_one\_step\_class} \\
+Non-admissible represented adjacent classes (horizon/stochastic/transition-coupled) & Transfer blocked by witness & \nolinkurl{ClaimClosure.bridge\_failure\_witness\_non\_one\_step}, \nolinkurl{ClaimClosure.bridge\_boundary\_represented\_family} \\
+\bottomrule
+\end{tabularx}
+\end{center}
 
 \subsection{Adjacent Objective Regimes and Bridge}
 
@@ -262,6 +287,17 @@ If post-decision transition effects are objective-relevant, bridge transfer to t
 \textit{(Lean: \nolinkurl{ClaimClosure.transition_coupled_bridge_can_fail_on_sufficiency}.)}
 \end{proposition}
 
+\begin{theorem}[Exact Bridge Boundary in the Represented Adjacent Family]\label{thm:bridge-boundary-represented}
+Within the represented adjacent family
+\[
+\{\text{one-step deterministic},\ \text{horizon-extended},\ \text{stochastic-criterion},\ \text{transition-coupled}\},
+\]
+direct transfer of static sufficiency claims is licensed if and only if the class is one-step deterministic. Each represented non-one-step class has an explicit mechanized bridge-failure witness.
+\textit{(Lean: \nolinkurl{ClaimClosure.bridge\_transfer\_iff\_one\_step\_class},
+\nolinkurl{ClaimClosure.bridge\_failure\_witness\_non\_one\_step},
+\nolinkurl{ClaimClosure.bridge\_boundary\_represented\_family}.)}
+\end{theorem}
+
 \section{Interpretive Foundations: Hardness and Solver Claims}\label{sec:interpretive-foundations}
 
 The claims in later applied sections are theorem-indexed consequences of this section and Sections~\ref{sec:hardness}--\ref{sec:tractable}.
@@ -278,7 +314,19 @@ For a fixed decision relation and an encoding regime $E$ (Section~\ref{sec:encod
 
 \begin{remark}[Interpretation Contract]
 This paper keeps the decision relation fixed and varies the encoding regime explicitly. Thus, later separations are read as changes in representational hardness under fixed structural complexity, not as changes to the underlying sufficiency semantics.
+Accordingly, ``complete landscape'' means complete for this static sufficiency class under the declared regimes; adjacent objective classes are distinct typed objects, not unproved remainder cases of the same class.
 \end{remark}
+
+\begin{theorem}[Typed Completeness for the Static Sufficiency Class]\label{thm:typed-completeness-static}
+For the static sufficiency class fixed by C1--C4 and declared regime family $\mathcal{R}_{\mathrm{static}}$, the paper provides:
+\begin{enumerate}
+\item conditional class-label closures for SUFFICIENCY-CHECK, MINIMUM-SUFFICIENT-SET, and ANCHOR-SUFFICIENCY;
+\item a conditional explicit/succinct dichotomy closure;
+\item a regime-indexed mechanized core claim for every declared regime; and
+\item declared-family exhaustiveness in the typed regime algebra.
+\end{enumerate}
+\textit{(Lean package: \nolinkurl{ClaimClosure.typed\_static\_class\_completeness}.)}
+\end{theorem}
 
 \subsection{Solver Integrity and Regime Competence}
 
