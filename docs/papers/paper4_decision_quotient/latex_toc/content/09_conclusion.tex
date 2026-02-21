@@ -23,7 +23,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 \item \textbf{MINIMUM-SUFFICIENT-SET} is \coNP-complete (Theorem~\ref{thm:minsuff-conp})
 \item \textbf{ANCHOR-SUFFICIENCY} is $\SigmaP{2}$-complete (Theorem~\ref{thm:anchor-sigma2p})
 \item An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem~\ref{thm:dichotomy})
-\item An intermediate query-access obstruction family is formalized in the Boolean query submodel, with exponential scale $2^{|I|}-1$ in queried-coordinate size (Proposition~\ref{prop:query-regime-obstruction})
+\item A full intermediate query-access lower bound is formalized in the Boolean query submodel: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK via an indistinguishable pair on the $I=\emptyset$ subproblem (Proposition~\ref{prop:query-regime-obstruction})
 \item Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem~\ref{thm:tractable})
 \end{itemize}
 
@@ -42,7 +42,7 @@ The results provide precise complexity characterizations within the formal model
 
 \item \textbf{Constructive reductions.} The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-\item \textbf{Encoding-regime separation.} Under [E], SUFFICIENCY-CHECK is polynomial in $|S|$. Under [S+ETH], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under [Q\_bool], the mechanized obstruction scale is exponential in queried-coordinate size ($2^{|I|}-1$). Other intermediate access models remain open.
+\item \textbf{Encoding-regime separation.} Under [E], SUFFICIENCY-CHECK is polynomial in $|S|$. Under [S+ETH], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under [Q\_bool], the mechanized lower bound is $\Omega(2^n)$ queries in the worst case for full SUFFICIENCY-CHECK (via the $I=\emptyset$ subproblem). Other intermediate access models remain open.
 \end{enumerate}
 
 \subsection*{The Complexity Redistribution Corollary}
@@ -71,7 +71,7 @@ Several questions remain for future work:
 The practical corollaries are regime-indexed and theorem-indexed:
 \begin{itemize}
 \item \textbf{[E] and structured regimes:} polynomial-time exact procedures exist (Theorem~\ref{thm:tractable}).
-\item \textbf{[Q\_bool] query-access obstruction:} queried-coordinate complexity has exponential obstruction scale (Proposition~\ref{prop:query-regime-obstruction}).
+\item \textbf{[Q\_bool] query-access lower bound:} worst-case full-problem query complexity is $\Omega(2^n)$ (Proposition~\ref{prop:query-regime-obstruction}).
 \item \textbf{[S+ETH] hard families:} exact minimization inherits exponential worst-case cost (Theorem~\ref{thm:dichotomy} together with Theorem~\ref{thm:sufficiency-conp}).
 \item \textbf{[S\_bool] mechanized criterion:} minimization reduces to relevance-cardinality constraints (Corollary~\ref{cor:practice-diagnostic}).
 \item \textbf{Redistribution consequences:} omitted native coverage externalizes work with explicit growth/amortization laws (Theorems~\ref{thm:tax-conservation}--\ref{thm:amortization}).

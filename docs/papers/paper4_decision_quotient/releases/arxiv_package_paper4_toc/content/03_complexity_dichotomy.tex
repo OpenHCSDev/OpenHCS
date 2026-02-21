@@ -36,19 +36,24 @@ There is a clean separation between explicit-state tractability and succinct wor
 For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 \end{corollary}
 
-\begin{proposition}[Intermediate Query-Access Obstruction]\label{prop:query-regime-obstruction}
-In the mechanized Boolean query regime [Q\_bool], the obstruction scale in queried-coordinate size is exponential:
-\[
-\exists L_I,\quad L_I = 2^{|I|}-1 \;\wedge\; \big(L_I>0 \iff |I|>0\big).
-\]
-For every nonempty $I$, there exist distinct target patterns that agree outside $I$ and differ on $I$, providing a formalized query-obstruction family at that scale.
-\textit{(Lean: \nolinkurl{queryComplexityLowerBound},
-\nolinkurl{exponential_query_complexity},
-\nolinkurl{exists_distinct_patterns}.)}
+\begin{proposition}[Full Query-Access Lower Bound via Empty-Set Subproblem]\label{prop:query-regime-obstruction}
+In the mechanized Boolean query regime [Q\_bool], fix $n>0$ and let $Q$ be any queried-state set with $|Q|<2^n$.
+Then there exist two decision problems $\mathcal{D}_{\mathrm{yes}},\mathcal{D}_{\mathrm{no}}$ over the same state space such that:
+\begin{itemize}
+\item their oracle views on all states in $Q$ are identical,
+\item $\emptyset$ is sufficient for $\mathcal{D}_{\mathrm{yes}}$,
+\item $\emptyset$ is not sufficient for $\mathcal{D}_{\mathrm{no}}$.
+\end{itemize}
+Consequently, no deterministic query procedure using fewer than $2^n$ state queries can solve SUFFICIENCY-CHECK on all such instances; the worst-case query complexity is $\Omega(2^n)$.
+\textit{(Lean: \nolinkurl{emptySufficiency_query_indistinguishable_pair},
+\nolinkurl{constTrue_empty_sufficient},
+\nolinkurl{spike_empty_not_sufficient}; obstruction-scale companion:
+\nolinkurl{queryComplexityLowerBound},
+\nolinkurl{exponential_query_complexity}.)}
 \end{proposition}
 
 \begin{proof}
-The exact exponential scale is given by \texttt{exponential\_query\_complexity}. The nonempty-coordinate witness family is given by \texttt{exists\_distinct\_patterns} and \texttt{queryComplexityLowerBound}, which provide target pairs agreeing outside $I$ but differing on $I$ together with the corresponding nontrivial lower-scale witness.
+The theorem \texttt{emptySufficiency\_query\_indistinguishable\_pair} provides, for any $|Q|<2^n$, two oracle-indistinguishable instances with opposite truth values for the $\emptyset$-sufficiency predicate. Since SUFFICIENCY-CHECK contains the $I=\emptyset$ case, any deterministic solver that queries fewer than $2^n$ states cannot be correct on both instances, yielding the $\Omega(2^n)$ worst-case query lower bound in this regime. The scale identities \texttt{queryComplexityLowerBound} and \texttt{exponential\_query\_complexity} remain as companion obstruction statements.
 \end{proof}
 
 \begin{remark}[Instantiation of Definitions~\ref{def:structural-complexity} and~\ref{def:representational-hardness}]

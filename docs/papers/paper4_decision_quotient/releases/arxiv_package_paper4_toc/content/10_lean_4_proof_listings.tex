@@ -13,7 +13,7 @@ The Lean formalization establishes:
 
 \item \textbf{Economic theorems:} Simplicity Tax redistribution identities and hardness distribution results.
 
-\item \textbf{Query-access obstruction family:} Formalized Boolean query-model constructions and exponential obstruction-scale identities (\texttt{queryComplexityLowerBound}, \texttt{exponential\_query\_complexity}).
+\item \textbf{Query-access lower-bound core:} Formalized Boolean query-model indistinguishability theorem for the full problem via the $I=\emptyset$ subproblem (\texttt{emptySufficiency\_query\_indistinguishable\_pair}), plus obstruction-scale identities (\texttt{queryComplexityLowerBound}, \texttt{exponential\_query\_complexity}).
 \end{enumerate}
 
 \textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
@@ -145,8 +145,8 @@ Strict ordering theorem for shared nonempty behavior denominator. \\
 \nolinkurl{DecisionProblem.minimalSufficient_iff_relevant}, \nolinkurl{DecisionProblem.relevantSet_is_minimal} &
 Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set. \\
 \nolinkurl{prop:query-regime-obstruction} & Full &
-\nolinkurl{queryComplexityLowerBound}, \nolinkurl{exponential_query_complexity}, \nolinkurl{exists_distinct_patterns} &
-Mechanized Boolean query-regime obstruction family and exponential scale identity in $|I|$. \\
+\nolinkurl{emptySufficiency_query_indistinguishable_pair}, \nolinkurl{constTrue_empty_sufficient}, \nolinkurl{spike_empty_not_sufficient}, \nolinkurl{queryComplexityLowerBound}, \nolinkurl{exponential_query_complexity} &
+Mechanized Boolean query-regime full lower-bound core (via $I=\emptyset$ indistinguishability) plus obstruction-scale identities. \\
 \nolinkurl{prop:set-to-selector} & Full &
 \nolinkurl{DecisionProblem.sufficient_implies_selectorSufficient} &
 Set-valued sufficiency implies selector-level sufficiency for any deterministic selector. \\

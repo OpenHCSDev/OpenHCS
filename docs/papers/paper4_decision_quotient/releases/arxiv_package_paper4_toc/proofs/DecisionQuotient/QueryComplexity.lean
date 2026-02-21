@@ -12,11 +12,21 @@
 -/
 
 import DecisionQuotient.Sufficiency
+import DecisionQuotient.Instances
+import Mathlib.Data.Bool.Basic
 import Mathlib.Data.Finset.Card
 import Mathlib.Data.Finset.Powerset
 import Mathlib.Data.Fintype.Basic
+import Mathlib.Data.Fintype.Card
+import Mathlib.Data.Fintype.Pi
 
 namespace DecisionQuotient
+
+noncomputable instance instFintypeFinBoolFun (n : ℕ) : Fintype (Fin n → Bool) where
+  elems := Fintype.piFinset (fun _ : Fin n => ({false, true} : Finset Bool))
+  complete := by
+    intro f
+    exact (Fintype.mem_piFinset).2 (fun _ => by simp)
 
 /-! ## Query Model
 
@@ -274,5 +284,121 @@ theorem exponential_query_complexity {n : ℕ} (I : Finset (Fin n)) :
     have h2k : 2 ^ I.card ≥ 2 := Nat.one_lt_two_pow hne
     omega
 
-end DecisionQuotient
+/-! ## Full SUFFICIENCY-CHECK query lower bound (empty-set subproblem)
 
+This section strengthens the query-regime story from obstruction scale to an
+indistinguishability lower bound for the full SUFFICIENCY-CHECK problem via
+the `I = ∅` subproblem.
+-/
+
+/-- Constant optimizer instance: `Opt(s) = {true}` for all states. -/
+def constTrueProblem {n : ℕ} : DecisionProblem Bool (Fin n → Bool) where
+  utility := fun a _ => if a = true then 1 else 0
+
+/-- Spike instance: identical to `constTrueProblem` except at one hidden state `s0`,
+where `Opt(s0) = {false}`. -/
+def spikeProblem {n : ℕ} (s0 : Fin n → Bool) : DecisionProblem Bool (Fin n → Bool) where
+  utility := fun a s =>
+    if s = s0 then
+      if a = true then 0 else 1
+    else
+      if a = true then 1 else 0
+
+theorem constTrueProblem_opt {n : ℕ} (s : Fin n → Bool) :
+    (constTrueProblem (n := n)).Opt s = {true} := by
+  ext a
+  cases a <;> simp [constTrueProblem, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem spikeProblem_opt_at {n : ℕ} (s0 : Fin n → Bool) :
+    (spikeProblem (n := n) s0).Opt s0 = {false} := by
+  ext a
+  cases a <;> simp [spikeProblem, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem spikeProblem_opt_off {n : ℕ} (s0 s : Fin n → Bool) (hs : s ≠ s0) :
+    (spikeProblem (n := n) s0).Opt s = {true} := by
+  ext a
+  cases a <;> simp [spikeProblem, hs, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem constTrue_empty_sufficient {n : ℕ} :
+    (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) := by
+  refine (DecisionProblem.emptySet_sufficient_iff_constant (dp := constTrueProblem (n := n))).2 ?_
+  intro s s'
+  rw [constTrueProblem_opt (n := n) s, constTrueProblem_opt (n := n) s']
+
+/-- Flip one coordinate to build a second state distinct from `s0`. -/
+def flipAt {n : ℕ} (s : Fin n → Bool) (i : Fin n) : Fin n → Bool :=
+  fun j => if j = i then !(s j) else s j
+
+theorem flipAt_ne {n : ℕ} (s : Fin n → Bool) (i : Fin n) :
+    flipAt s i ≠ s := by
+  intro hEq
+  have hAtI := congrArg (fun f => f i) hEq
+  simp [flipAt] at hAtI
+
+theorem spike_empty_not_sufficient {n : ℕ} (hn : 0 < n) (s0 : Fin n → Bool) :
+    ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n)) := by
+  intro hsuff
+  let i0 : Fin n := ⟨0, hn⟩
+  let s1 : Fin n → Bool := flipAt s0 i0
+  have hs1_ne : s1 ≠ s0 := by
+    dsimp [s1]
+    exact flipAt_ne (s := s0) i0
+  have hconst :=
+    (DecisionProblem.emptySet_sufficient_iff_constant (dp := spikeProblem (n := n) s0)).1 hsuff
+  have hEq := hconst s0 s1
+  rw [spikeProblem_opt_at (n := n) s0, spikeProblem_opt_off (n := n) s0 s1 hs1_ne] at hEq
+  have hsets : ({false} : Set Bool) ≠ ({true} : Set Bool) := by
+    intro hset
+    have hmem : (false : Bool) ∈ ({true} : Set Bool) := by
+      simpa [hset] using (show (false : Bool) ∈ ({false} : Set Bool) by simp)
+    have : (false : Bool) = true := by simpa using hmem
+    exact Bool.false_ne_true this
+  exact hsets hEq
+
+/-- Oracle-view restricted to a queried state set `Q`. -/
+def oracleView {n : ℕ} (Q : Finset (Fin n → Bool))
+    (dp : DecisionProblem Bool (Fin n → Bool)) :
+    {s // s ∈ Q} → Set Bool :=
+  fun s => dp.Opt s.1
+
+/-- Agreement on queried states implies identical oracle views. -/
+theorem oracleView_eq_of_agree {n : ℕ}
+    (Q : Finset (Fin n → Bool))
+    (dp₁ dp₂ : DecisionProblem Bool (Fin n → Bool))
+    (hag : ∀ s, s ∈ Q → dp₁.Opt s = dp₂.Opt s) :
+    oracleView Q dp₁ = oracleView Q dp₂ := by
+  funext s
+  exact hag s.1 s.2
+
+/-- Strong query-obstruction theorem (empty-set sufficiency subproblem).
+For any queried-state set strictly smaller than the full state space, there exists
+an unqueried hidden state producing two instances that are indistinguishable on all
+queries but disagree on whether `∅` is sufficient. -/
+theorem emptySufficiency_query_indistinguishable_pair {n : ℕ}
+    (hn : 0 < n) (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool)) :
+    ∃ s0 : Fin n → Bool,
+      s0 ∉ Q ∧
+      (oracleView Q (constTrueProblem (n := n)) =
+        oracleView Q (spikeProblem (n := n) s0)) ∧
+      (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+      ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n)) := by
+  have hsubset : Q ⊆ (Finset.univ : Finset (Fin n → Bool)) := by
+    intro s hs
+    exact Finset.mem_univ s
+  have hsdiff : (Finset.univ \ Q).card = Fintype.card (Fin n → Bool) - Q.card := by
+    simpa using Finset.card_sdiff hsubset
+  have hpos : 0 < (Finset.univ \ Q).card := by
+    rw [hsdiff]
+    exact Nat.sub_pos_of_lt hQ
+  rcases Finset.card_pos.mp hpos with ⟨s0, hs0_mem⟩
+  have hs0_notin : s0 ∉ Q := (Finset.mem_sdiff.mp hs0_mem).2
+  refine ⟨s0, hs0_notin, ?_, constTrue_empty_sufficient (n := n), spike_empty_not_sufficient (n := n) hn s0⟩
+  apply oracleView_eq_of_agree (Q := Q)
+  intro s hsQ
+  have hs_ne : s ≠ s0 := by
+    intro hEq
+    exact hs0_notin (hEq ▸ hsQ)
+  rw [constTrueProblem_opt (n := n) s, spikeProblem_opt_off (n := n) s0 s hs_ne]
+
+end DecisionQuotient
