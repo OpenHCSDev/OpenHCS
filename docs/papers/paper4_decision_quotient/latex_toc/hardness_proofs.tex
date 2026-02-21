@@ -139,13 +139,14 @@ MINIMUM-SUFFICIENT-SET is coNP-complete.
 \]
 However, this collapses because sufficiency has a simple characterization.
 
-\textbf{Key lemma:} A coordinate set $I$ is sufficient if and only if $I$ contains all relevant coordinates (proven formally as \texttt{sufficient\_contains\_relevant} in Lean):
+\textbf{Key lemma:} In the Boolean-coordinate collapse model, a coordinate set $I$ is sufficient if and only if $I$ contains all relevant coordinates (proven formally as \texttt{sufficient\_iff\_relevant\_subset} / \texttt{sufficient\_iff\_relevantFinset\_subset} in Lean):
 \[
 \text{sufficient}(I) \iff \text{Relevant} \subseteq I
 \]
 where $\text{Relevant} = \{i : \exists s, s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \text{Opt}(s) \neq \text{Opt}(s')\}$.
+This is the same relevance object as Definition~\ref{def:relevant}; Proposition~\ref{prop:minimal-relevant-equiv} gives the minimal-set equivalence in the product-space semantics used by the collapse.
 
-\textbf{Consequence:} The minimum sufficient set is exactly the set of relevant coordinates. Thus MINIMUM-SUFFICIENT-SET asks: ``Is the number of relevant coordinates at most $k$?''
+\textbf{Consequence:} The minimum sufficient set is exactly the relevant-coordinate set. Thus MINIMUM-SUFFICIENT-SET asks: ``Is the number of relevant coordinates at most $k$?''
 
 \textbf{coNP membership:} A witness that the answer is NO is a set of $k+1$ coordinates, each proven relevant (by exhibiting $s, s'$ pairs). Verification is polynomial.
 
@@ -276,7 +277,7 @@ Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather tha
 \end{theorem}
 
 \begin{proof}
-By the formal lemma \texttt{sufficient\_contains\_relevant}, a coordinate set $I$ is sufficient iff $\text{Relevant}\subseteq I$. Therefore:
+By the formal equivalence \texttt{sufficient\_iff\_relevant\_subset} (finite-set form \texttt{sufficient\_iff\_relevantFinset\_subset}), a coordinate set $I$ is sufficient iff $\text{Relevant}\subseteq I$. Therefore:
 \[
 \exists I \; (|I|\le k \wedge \text{sufficient}(I))
 \iff

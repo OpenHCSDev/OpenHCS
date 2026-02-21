@@ -56,6 +56,25 @@ variable {A S : Type*} {n : ℕ} [CoordinateSpace S n]
 def DecisionProblem.isSufficient (dp : DecisionProblem A S) (I : Finset (Fin n)) : Prop :=
   ∀ s s' : S, agreeOn s s' I → dp.Opt s = dp.Opt s'
 
+/-- A deterministic selector extracts one action from an optimal-action set. -/
+def DecisionProblem.SelectedAction (dp : DecisionProblem A S) (σ : Set A → A) (s : S) : A :=
+  σ (dp.Opt s)
+
+/-- Sufficiency relative to a fixed deterministic selector. -/
+def DecisionProblem.isSelectorSufficient (dp : DecisionProblem A S)
+    (σ : Set A → A) (I : Finset (Fin n)) : Prop :=
+  ∀ s s' : S, agreeOn s s' I → dp.SelectedAction σ s = dp.SelectedAction σ s'
+
+/-- Full optimal-set sufficiency implies selector-level sufficiency
+    for every deterministic selector. -/
+theorem DecisionProblem.sufficient_implies_selectorSufficient
+    (dp : DecisionProblem A S) (I : Finset (Fin n))
+    (hI : dp.isSufficient I) (σ : Set A → A) :
+    dp.isSelectorSufficient σ I := by
+  intro s s' hagree
+  unfold DecisionProblem.SelectedAction
+  exact congrArg σ (hI s s' hagree)
+
 /-- The empty set is sufficient iff Opt is constant -/
 theorem DecisionProblem.emptySet_sufficient_iff_constant (dp : DecisionProblem A S) :
     dp.isSufficient (∅ : Finset (Fin n)) ↔ ∀ s s' : S, dp.Opt s = dp.Opt s' := by
@@ -281,4 +300,3 @@ theorem DecisionProblem.minimalSufficient_all_relevant'
   (dp.minimalSufficient_iff_relevant I hmin i).mp hi
 
 end DecisionQuotient
-

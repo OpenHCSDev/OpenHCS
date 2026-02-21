@@ -37,15 +37,55 @@ A coordinate set $I \subseteq \{1, \ldots, n\}$ is \emph{sufficient} for decisio
 \forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')
 \]
 Equivalently, the optimal action depends only on coordinates in $I$.
+In this paper, this set-valued invariance of the full optimal-action correspondence is the primary decision-relevance target.
 \end{definition}
+
+\begin{definition}[Deterministic Selector]\label{def:selector}
+A \emph{deterministic selector} is a map $\sigma : 2^A \to A$ that returns one action from an optimal-action set.
+\end{definition}
+
+\begin{definition}[Selector-Level Sufficiency]\label{def:selector-sufficient}
+For fixed selector $\sigma$, a coordinate set $I$ is \emph{selector-sufficient} if
+\[
+\forall s,s' \in S:\quad s_I=s'_I \implies \sigma(\Opt(s))=\sigma(\Opt(s')).
+\]
+\end{definition}
+
+\begin{proposition}[Set-Level Target Dominates Selector Targets]\label{prop:set-to-selector}
+If $I$ is sufficient in the set-valued sense (Definition~\ref{def:sufficient}), then $I$ is selector-sufficient for every deterministic selector $\sigma$ (Definition~\ref{def:selector-sufficient}).
+\textit{(Lean: \nolinkurl{DecisionProblem.sufficient_implies_selectorSufficient})}
+\end{proposition}
+
+\begin{proof}
+If $I$ is sufficient, then $s_I=s'_I$ implies $\Opt(s)=\Opt(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions.
+\end{proof}
 
 \begin{definition}[Minimal Sufficient Set]\label{def:minimal-sufficient}
 A sufficient set $I$ is \emph{minimal} if no proper subset $I' \subsetneq I$ is sufficient.
 \end{definition}
 
 \begin{definition}[Relevant Coordinate]\label{def:relevant}
-Coordinate $i$ is \emph{relevant} if it belongs to some minimal sufficient set.
+Coordinate $i$ is \emph{relevant} if there exist states that differ only at coordinate $i$ and induce different optimal action sets:
+\[
+i \text{ is relevant}
+\iff
+\exists s,s' \in S:\; \Big(\forall j \neq i,\; s_j = s'_j\Big)\ \wedge\ \Opt(s)\neq\Opt(s').
+\]
 \end{definition}
+
+\begin{proposition}[Minimal-Set/Relevance Equivalence]\label{prop:minimal-relevant-equiv}
+For any minimal sufficient set $I$ and any coordinate $i$:
+\[
+i \in I \iff i \text{ is relevant}.
+\]
+Hence every minimal sufficient set is exactly the relevant-coordinate set.
+\textit{(Lean product-space handles: \nolinkurl{DecisionProblem.minimalSufficient_iff_relevant},
+\nolinkurl{DecisionProblem.relevantSet_is_minimal}.)}
+\end{proposition}
+
+\begin{proof}
+The ``only if'' direction follows by minimality: if $i\in I$ were irrelevant, removing $i$ would preserve sufficiency, contradicting minimality. The ``if'' direction follows from sufficiency: every sufficient set must contain each relevant coordinate.
+\end{proof}
 
 \begin{definition}[Exact Relevance Identifiability]\label{def:exact-identifiability}
 For a decision problem $\mathcal{D}$ and candidate coordinate set $I$, we say $I$ is \emph{exactly relevance-identifying} if
@@ -158,6 +198,17 @@ Then the induced optimization problem is exactly the static decision problem of 
 \begin{proof}
 Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\Opt(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\Opt$ from Definition~\ref{def:optimizer}, and the invariance condition ``same projection implies same optimal choice set'' is exactly Definition~\ref{def:sufficient}.
 \end{proof}
+
+\begin{proposition}[Bridge Transfer Rule]\label{prop:bridge-transfer-scope}
+Under conditions (1)--(4), any sufficiency statement formulated over Definition~\ref{def:sufficient} is equivalent between the adjacent sequential formulation and the static model.
+\textit{(Lean: \nolinkurl{ClaimClosure.one_step_bridge})}
+\end{proposition}
+
+\begin{proof}
+By Proposition~\ref{prop:one-step-bridge}, the adjacent sequential objective induces exactly the same sufficiency predicate as Definition~\ref{def:sufficient} when (1)--(4) hold. Equivalence of any sufficiency statement then follows by substitution.
+\end{proof}
+
+If any bridge condition fails, direct transfer from this paper's static complexity theorems is not licensed by this rule.
 
 \begin{remark}[Extension Boundary]
 Beyond Proposition~\ref{prop:one-step-bridge} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.

@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7132 lines, 315 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7150 lines, 316 theorems
 
 ---
 
@@ -20,7 +20,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7132 lines, 315 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7150 lines, 316 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -91,7 +91,7 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7132 lines, 315 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7150 lines, 316 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -133,7 +133,23 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 ## Sufficiency and Relevance
 
 ::: definition
-[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')$$ Equivalently, the optimal action depends only on coordinates in $I$.
+[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')$$ Equivalently, the optimal action depends only on coordinates in $I$. In this paper, this set-valued invariance of the full optimal-action correspondence is the primary decision-relevance target.
+:::
+
+::: definition
+[]{#def:selector label="def:selector"} A *deterministic selector* is a map $\sigma : 2^A \to A$ that returns one action from an optimal-action set.
+:::
+
+::: definition
+[]{#def:selector-sufficient label="def:selector-sufficient"} For fixed selector $\sigma$, a coordinate set $I$ is *selector-sufficient* if $$\forall s,s' \in S:\quad s_I=s'_I \implies \sigma(\Opt(s))=\sigma(\Opt(s')).$$
+:::
+
+::: proposition
+[]{#prop:set-to-selector label="prop:set-to-selector"} If $I$ is sufficient in the set-valued sense (Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}), then $I$ is selector-sufficient for every deterministic selector $\sigma$ (Definition [\[def:selector-sufficient\]](#def:selector-sufficient){reference-type="ref" reference="def:selector-sufficient"}). *(Lean: `DecisionProblem.sufficient_implies_selectorSufficient`)*
+:::
+
+::: proof
+*Proof.* If $I$ is sufficient, then $s_I=s'_I$ implies $\Opt(s)=\Opt(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions. ◻
 :::
 
 ::: definition
@@ -141,7 +157,17 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 :::
 
 ::: definition
-[]{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if it belongs to some minimal sufficient set.
+[]{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if there exist states that differ only at coordinate $i$ and induce different optimal action sets: $$i \text{ is relevant}
+\iff
+\exists s,s' \in S:\; \Big(\forall j \neq i,\; s_j = s'_j\Big)\ \wedge\ \Opt(s)\neq\Opt(s').$$
+:::
+
+::: proposition
+[]{#prop:minimal-relevant-equiv label="prop:minimal-relevant-equiv"} For any minimal sufficient set $I$ and any coordinate $i$: $$i \in I \iff i \text{ is relevant}.$$ Hence every minimal sufficient set is exactly the relevant-coordinate set. *(Lean product-space handles: `DecisionProblem.minimalSufficient_iff_relevant`, `DecisionProblem.relevantSet_is_minimal`.)*
+:::
+
+::: proof
+*Proof.* The "only if" direction follows by minimality: if $i\in I$ were irrelevant, removing $i$ would preserve sufficiency, contradicting minimality. The "if" direction follows from sufficiency: every sufficient set must contain each relevant coordinate. ◻
 :::
 
 ::: definition
@@ -257,6 +283,16 @@ Then the induced optimization problem is exactly the static decision problem of 
 ::: proof
 *Proof.* Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\Opt(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\Opt$ from Definition [\[def:optimizer\]](#def:optimizer){reference-type="ref" reference="def:optimizer"}, and the invariance condition "same projection implies same optimal choice set" is exactly Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}. ◻
 :::
+
+::: proposition
+[]{#prop:bridge-transfer-scope label="prop:bridge-transfer-scope"} Under conditions (1)--(4), any sufficiency statement formulated over Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"} is equivalent between the adjacent sequential formulation and the static model. *(Lean: `ClaimClosure.one_step_bridge`)*
+:::
+
+::: proof
+*Proof.* By Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-type="ref" reference="prop:one-step-bridge"}, the adjacent sequential objective induces exactly the same sufficiency predicate as Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"} when (1)--(4) hold. Equivalence of any sufficiency statement then follows by substitution. ◻
+:::
+
+If any bridge condition fails, direct transfer from this paper's static complexity theorems is not licensed by this rule.
 
 ::: remark
 Beyond Proposition [\[prop:one-step-bridge\]](#prop:one-step-bridge){reference-type="ref" reference="prop:one-step-bridge"} (multi-step horizon, stochastic transitions/rewards, or regret objectives), the governing complexity objects change. Those regimes are natural extensions, but they are distinct formal classes from the static sufficiency class analyzed in this paper.
@@ -465,9 +501,9 @@ We formalized a strengthened reduction in Lean 4: given a Boolean formula $\varp
 ::: proof
 *Proof.* **Structural observation:** The $\exists\forall$ quantifier pattern suggests $\Sigma_2^P$: $$\exists I \, (|I| \leq k) \; \forall s, s' \in S: \quad s_I = s'_I \implies \text{Opt}(s) = \text{Opt}(s')$$ However, this collapses because sufficiency has a simple characterization.
 
-**Key lemma:** A coordinate set $I$ is sufficient if and only if $I$ contains all relevant coordinates (proven formally as `sufficient_contains_relevant` in Lean): $$\text{sufficient}(I) \iff \text{Relevant} \subseteq I$$ where $\text{Relevant} = \{i : \exists s, s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \text{Opt}(s) \neq \text{Opt}(s')\}$.
+**Key lemma:** In the Boolean-coordinate collapse model, a coordinate set $I$ is sufficient if and only if $I$ contains all relevant coordinates (proven formally as `sufficient_iff_relevant_subset` / `sufficient_iff_relevantFinset_subset` in Lean): $$\text{sufficient}(I) \iff \text{Relevant} \subseteq I$$ where $\text{Relevant} = \{i : \exists s, s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \text{Opt}(s) \neq \text{Opt}(s')\}$. This is the same relevance object as Definition [\[def:relevant\]](#def:relevant){reference-type="ref" reference="def:relevant"}; Proposition [\[prop:minimal-relevant-equiv\]](#prop:minimal-relevant-equiv){reference-type="ref" reference="prop:minimal-relevant-equiv"} gives the minimal-set equivalence in the product-space semantics used by the collapse.
 
-**Consequence:** The minimum sufficient set is exactly the set of relevant coordinates. Thus MINIMUM-SUFFICIENT-SET asks: "Is the number of relevant coordinates at most $k$?"
+**Consequence:** The minimum sufficient set is exactly the relevant-coordinate set. Thus MINIMUM-SUFFICIENT-SET asks: "Is the number of relevant coordinates at most $k$?"
 
 **coNP membership:** A witness that the answer is NO is a set of $k+1$ coordinates, each proven relevant (by exhibiting $s, s'$ pairs). Verification is polynomial.
 
@@ -562,7 +598,7 @@ The modeling budget for deciding what to model is therefore a computationally co
 :::
 
 ::: proof
-*Proof.* By the formal lemma `sufficient_contains_relevant`, a coordinate set $I$ is sufficient iff $\text{Relevant}\subseteq I$. Therefore: $$\exists I \; (|I|\le k \wedge \text{sufficient}(I))
+*Proof.* By the formal equivalence `sufficient_iff_relevant_subset` (finite-set form `sufficient_iff_relevantFinset_subset`), a coordinate set $I$ is sufficient iff $\text{Relevant}\subseteq I$. Therefore: $$\exists I \; (|I|\le k \wedge \text{sufficient}(I))
 \iff
 \exists I \; (|I|\le k \wedge \text{Relevant}\subseteq I)
 \iff
@@ -1275,7 +1311,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7132 lines across 42 files, with 315 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7150 lines across 42 files, with 316 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1398,7 +1434,13 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:integrity-competence-separation`      Full                 `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                                                                                                                                                                                                                                    Direct pair mapping.
 
+  `prop:minimal-relevant-equiv`               Full                 `DecisionProblem.minimalSufficient_iff_relevant`, `DecisionProblem.relevantSet_is_minimal`                                                                                                                                                                                                                                                             Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set.
+
+  `prop:set-to-selector`                      Full                 `DecisionProblem.sufficient_implies_selectorSufficient`                                                                                                                                                                                                                                                                                                Set-valued sufficiency implies selector-level sufficiency for any deterministic selector.
+
   `prop:attempted-competence-matrix`          Full                 `IntegrityCompetence.overModelVerdict_rational_iff`, `IntegrityCompetence.admissible_matrix_counts`, `IntegrityCompetence.admissible_irrational_strictly_more_than_rational`                                                                                                                                                                           Integrity-preserving matrix is mechanized: one rational admissible cell and three irrational admissible cells.
+
+  `prop:bridge-transfer-scope`                Full                 `ClaimClosure.one_step_bridge`                                                                                                                                                                                                                                                                                                                         Transfer rule follows from the one-step deterministic bridge equivalence.
 
   `prop:one-step-bridge`                      Full                 `ClaimClosure.one_step_bridge`                                                                                                                                                                                                                                                                                                                         One-step deterministic bridge is mechanized as an equivalence of sufficiency predicates.
 
@@ -1474,6 +1516,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7132
-- Theorems: 315
+- Lines: 7150
+- Theorems: 316
 - `sorry` placeholders: 0
