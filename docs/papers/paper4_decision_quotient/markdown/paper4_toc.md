@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7071 lines, 310 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7132 lines, 315 theorems
 
 ---
 
@@ -20,7 +20,7 @@ The tractable cases are stated with explicit encoding assumptions (Section [\[s
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7071 lines, 310 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7132 lines, 315 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -91,7 +91,7 @@ The lower-bound statement does not address intermediate regimes.
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7071 lines, 310 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7132 lines, 315 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -320,11 +320,33 @@ The output $\mathsf{ABSTAIN}$ (equivalently, $\mathsf{UNKNOWN}$) is first-class 
 *Proof.* Take the always-abstain solver $Q_\bot(x)=\mathsf{ABSTAIN}$ with any polynomial-time checker $V$. Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"} holds vacuously, so $(Q_\bot,V)$ is integrity-preserving, but it fails Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"} whenever $\mathcal{X}_\Gamma\neq\emptyset$ because coverage fails. Hence integrity does not imply competence. The converse is immediate because competence includes integrity as a conjunct. ◻
 :::
 
-This separation is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
+::: definition
+[]{#def:attempted-competence-failure label="def:attempted-competence-failure"} Fix an exact objective under regime $\Gamma$. A solver state is an *attempted competence failure* if:
+
+-   integrity holds (Definition [\[def:solver-integrity\]](#def:solver-integrity){reference-type="ref" reference="def:solver-integrity"}),
+
+-   exact competence was actually attempted for the active scope/objective,
+
+-   competence on $\Gamma$ fails for that exact objective (Definition [\[def:competence-regime\]](#def:competence-regime){reference-type="ref" reference="def:competence-regime"}).
+:::
+
+::: proposition
+[]{#prop:attempted-competence-matrix label="prop:attempted-competence-matrix"} Let $I,A,C\in\{0,1\}$ denote integrity, attempted exact competence, and competence available in the active regime. Policy verdict for persistent over-specification is:
+
+-   if $I=0$: inadmissible,
+
+-   if $I=1$ and $(A,C)=(1,0)$: conditionally rational,
+
+-   if $I=1$ and $(A,C)\in\{(0,0),(0,1),(1,1)\}$: irrational for the same verified-cost objective.
+
+Hence, in the integrity-preserving plane ($I=1$), exactly one cell is rational and three are irrational. *(Lean: `IntegrityCompetence.overModelVerdict_rational_iff`, `IntegrityCompetence.admissible_matrix_counts`, `IntegrityCompetence.admissible_irrational_strictly_more_than_rational`)*
+:::
+
+This separation plus Proposition [\[prop:attempted-competence-matrix\]](#prop:attempted-competence-matrix){reference-type="ref" reference="prop:attempted-competence-matrix"} is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime after an attempted exact procedure, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
 
 #### Mechanized status.
 
-This separation is machine-checked in `DecisionQuotient/IntegrityCompetence.lean` via: `competence_implies_integrity` and `integrity_not_competent_of_nonempty_scope`.
+This separation is machine-checked in `DecisionQuotient/IntegrityCompetence.lean` via: `competence_implies_integrity` and `integrity_not_competent_of_nonempty_scope`; the attempted-competence matrix is mechanized via `overModelVerdict_rational_iff`, `admissible_matrix_counts`, and `admissible_irrational_strictly_more_than_rational`.
 
 
 # Computational Complexity of Decision-Relevant Uncertainty {#sec:hardness}
@@ -650,6 +672,10 @@ This section derives regime-typed engineering corollaries from the core complexi
 
 Regime tags used below follow Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"}: \[S\], \[S+ETH\], \[E\], \[S_bool\]. Any prescription that requires exact minimization is constrained by these theorem-level bounds. Theorem [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-type="ref" reference="thm:overmodel-diagnostic"} implies that persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
 
+#### Conditional rationality criterion.
+
+For the objective "minimize verified total cost while preserving integrity," over-specification is rational only under *attempted competence failure* in the active regime (Definition [\[def:attempted-competence-failure\]](#def:attempted-competence-failure){reference-type="ref" reference="def:attempted-competence-failure"}): if exact irrelevance cannot be certified efficiently after an attempted exact procedure, integrity forbids uncertified exclusion. When exact competence is available in the active regime (e.g., Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} and the exact-identifiability criterion), persistent over-specification is irrational relative to that objective because proven-irrelevant coordinates can be removed with certified correctness. Proposition [\[prop:attempted-competence-matrix\]](#prop:attempted-competence-matrix){reference-type="ref" reference="prop:attempted-competence-matrix"} makes this explicit: in the integrity-preserving matrix, one cell is rational and three are irrational, so irrationality is the default verdict. *(Lean anchors: `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`, `IntegrityCompetence.admissible_matrix_counts`, `ClaimClosure.tractable_subcases_conditional`, `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`.)*
+
 ::: remark
 All claims in this section are formal corollaries under the declared model assumptions.
 
@@ -737,7 +763,7 @@ Assume ETH in the succinct encoding model of Section [\[sec:encoding\]](#sec:en
 
 Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-maintenance asymmetry satisfies: $$C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}$$
 
-Within \[S+ETH\], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. *(Lean handles: `ClaimClosure.cost_asymmetry_eth_conditional`, `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`.)*
+Within \[S+ETH\], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. Conversely, when exact competence is available in the active regime, persistent over-specification is irrational for the same cost-minimization objective. *(Lean handles: `ClaimClosure.cost_asymmetry_eth_conditional`, `HardnessDistribution.linear_lt_exponential_plus_constant_eventually`.)*
 :::
 
 ::: proof
@@ -792,7 +818,9 @@ Theorems [\[thm:overmodel-diagnostic\]](#thm:overmodel-diagnostic){reference-ty
 
 **3. Full-parameter inclusion as an $O(n)$ upper-bound strategy.** Under \[S+ETH\], if exact minimization is unresolved, including all $n$ parameters incurs linear maintenance overhead while avoiding false irrelevance claims.
 
-These corollaries are direct consequences of the hardness/tractability landscape: to move beyond them, one must either shift to tractable regimes from Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} or adopt explicit approximation commitments.
+**4. Irrationality outside attempted-competence-failure conditions.** If the active regime admits exact competence (tractable structural-access conditions or exact relevance identifiability), or if exact competence was never actually attempted, continued over-specification is not justified by hardness and is irrational relative to the stated objective. *(Lean anchors: `ClaimClosure.tractable_subcases_conditional`, `IntegrityCompetence.admissible_irrational_strictly_more_than_rational`, `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`.)*
+
+These corollaries are direct consequences of the hardness/tractability landscape: over-specification is an attempted-competence-failure policy, not a default optimum. To move beyond it, one must either shift to tractable regimes from Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} or adopt explicit approximation commitments.
 
 [^1]: Naive subset enumeration still gives an intuitive baseline of $O(2^n)$ checks, but that is an algorithmic upper bound; the theorem below uses ETH for the lower-bound argument.
 
@@ -819,6 +847,10 @@ Regime for this section: the mechanized Boolean-coordinate model \[S_bool\] plus
 
 ::: proof
 *Proof.* This is exactly `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`, with $R_{\mathrm{rel}}=\texttt{relevantFinset}$. ◻
+:::
+
+::: remark
+[]{#rem:overmodel-conditional label="rem:overmodel-conditional"} In this paper's formal typing, over-specification is rational only under attempted competence failure: exact relevance competence is unavailable in the active regime *after* an attempted exact procedure, and integrity forbids uncertified exclusion (Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}; Section [\[sec:engineering-justification\]](#sec:engineering-justification){reference-type="ref" reference="sec:engineering-justification"}). Once exact competence is available in the active regime (Corollaries [\[cor:practice-bounded\]](#cor:practice-bounded){reference-type="ref" reference="cor:practice-bounded"}--[\[cor:practice-tree\]](#cor:practice-tree){reference-type="ref" reference="cor:practice-tree"} together with Corollary [\[cor:exact-identifiability\]](#cor:exact-identifiability){reference-type="ref" reference="cor:exact-identifiability"}), persistent over-specification is irrational for the same objective (verified total-cost minimization), because excluded coordinates can be certified irrelevant. *(Lean anchors: `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`, `IntegrityCompetence.admissible_matrix_counts`, `sufficiency_poly_bounded_actions`, `sufficiency_poly_separable`, `sufficiency_poly_tree_structured`, `Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset`.)*
 :::
 
 ## Architectural Decision Quotient
@@ -1238,12 +1270,12 @@ The practical corollaries are regime-indexed and theorem-indexed:
 
 -   **Redistribution consequences:** omitted native coverage externalizes work with explicit growth/amortization laws (Theorems [\[thm:tax-conservation\]](#thm:tax-conservation){reference-type="ref" reference="thm:tax-conservation"}--[\[thm:amortization\]](#thm:amortization){reference-type="ref" reference="thm:amortization"}).
 
-Hence the design choice is typed: enforce a tractable regime, or adopt weakened guarantees with explicit verification boundaries.
+Hence the design choice is typed: enforce a tractable regime, or adopt weakened guarantees with explicit verification boundaries. Equivalently, over-specification is a conditional attempted-competence-failure policy in this framework; once exact competence is available in the active regime (or no attempted exact competence was made), persistent over-specification is irrational for the same verified-cost objective. By Proposition [\[prop:attempted-competence-matrix\]](#prop:attempted-competence-matrix){reference-type="ref" reference="prop:attempted-competence-matrix"}, this is not a close call: in the integrity-preserving matrix, irrational cells outnumber rational cells (3 vs 1).
 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7071 lines across 42 files, with 310 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7132 lines across 42 files, with 315 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1366,6 +1398,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:integrity-competence-separation`      Full                 `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                                                                                                                                                                                                                                    Direct pair mapping.
 
+  `prop:attempted-competence-matrix`          Full                 `IntegrityCompetence.overModelVerdict_rational_iff`, `IntegrityCompetence.admissible_matrix_counts`, `IntegrityCompetence.admissible_irrational_strictly_more_than_rational`                                                                                                                                                                           Integrity-preserving matrix is mechanized: one rational admissible cell and three irrational admissible cells.
+
   `prop:one-step-bridge`                      Full                 `ClaimClosure.one_step_bridge`                                                                                                                                                                                                                                                                                                                         One-step deterministic bridge is mechanized as an equivalence of sufficiency predicates.
 
   `prop:sufficiency-char`                     Full                 `ClaimClosure.sufficiency_iff_dq_ratio`, `ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt`                                                                                                                                                                                                                                                       Finite-model quotient characterization mechanized in both ratio form and projected-cover form.
@@ -1440,6 +1474,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7071
-- Theorems: 310
+- Lines: 7132
+- Theorems: 315
 - `sorry` placeholders: 0

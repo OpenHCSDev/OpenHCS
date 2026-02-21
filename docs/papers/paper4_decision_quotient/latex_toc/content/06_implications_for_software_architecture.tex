@@ -30,6 +30,17 @@ This is exactly
 with $R_{\mathrm{rel}}=\texttt{relevantFinset}$.
 \end{proof}
 
+\begin{remark}[Over-Specification Is Regime-Conditional, Not Default]\label{rem:overmodel-conditional}
+In this paper's formal typing, over-specification is rational only under attempted competence failure: exact relevance competence is unavailable in the active regime \emph{after} an attempted exact procedure, and integrity forbids uncertified exclusion (Section~\ref{sec:interpretive-foundations}; Section~\ref{sec:engineering-justification}). Once exact competence is available in the active regime (Corollaries~\ref{cor:practice-bounded}--\ref{cor:practice-tree} together with Corollary~\ref{cor:exact-identifiability}), persistent over-specification is irrational for the same objective (verified total-cost minimization), because excluded coordinates can be certified irrelevant.
+\textit{(Lean anchors: \nolinkurl{IntegrityCompetence.competence_implies_integrity},
+\nolinkurl{IntegrityCompetence.integrity_not_competent_of_nonempty_scope},
+\nolinkurl{IntegrityCompetence.admissible_matrix_counts},
+\nolinkurl{sufficiency_poly_bounded_actions},
+\nolinkurl{sufficiency_poly_separable},
+\nolinkurl{sufficiency_poly_tree_structured},
+\nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset}.)}
+\end{remark}
+
 \subsection{Architectural Decision Quotient}
 
 \begin{definition}[Architectural Decision Quotient]

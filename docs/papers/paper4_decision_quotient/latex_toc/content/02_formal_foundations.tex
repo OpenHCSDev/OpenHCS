@@ -219,12 +219,37 @@ Integrity and competence are distinct predicates: integrity constrains asserted 
 Take the always-abstain solver $Q_\bot(x)=\mathsf{ABSTAIN}$ with any polynomial-time checker $V$. Definition~\ref{def:solver-integrity} holds vacuously, so $(Q_\bot,V)$ is integrity-preserving, but it fails Definition~\ref{def:competence-regime} whenever $\mathcal{X}_\Gamma\neq\emptyset$ because coverage fails. Hence integrity does not imply competence. The converse is immediate because competence includes integrity as a conjunct.
 \end{proof}
 
-This separation is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
+\begin{definition}[Attempted Competence Failure]\label{def:attempted-competence-failure}
+Fix an exact objective under regime $\Gamma$. A solver state is an \emph{attempted competence failure} if:
+\begin{itemize}
+\item integrity holds (Definition~\ref{def:solver-integrity}),
+\item exact competence was actually attempted for the active scope/objective,
+\item competence on $\Gamma$ fails for that exact objective (Definition~\ref{def:competence-regime}).
+\end{itemize}
+\end{definition}
+
+\begin{proposition}[Attempted-Competence Rationality Matrix]\label{prop:attempted-competence-matrix}
+Let $I,A,C\in\{0,1\}$ denote integrity, attempted exact competence, and competence available in the active regime. Policy verdict for persistent over-specification is:
+\begin{itemize}
+\item if $I=0$: inadmissible,
+\item if $I=1$ and $(A,C)=(1,0)$: conditionally rational,
+\item if $I=1$ and $(A,C)\in\{(0,0),(0,1),(1,1)\}$: irrational for the same verified-cost objective.
+\end{itemize}
+Hence, in the integrity-preserving plane ($I=1$), exactly one cell is rational and three are irrational.
+\textit{(Lean: \nolinkurl{IntegrityCompetence.overModelVerdict_rational_iff},
+\nolinkurl{IntegrityCompetence.admissible_matrix_counts},
+\nolinkurl{IntegrityCompetence.admissible_irrational_strictly_more_than_rational})}
+\end{proposition}
+
+This separation plus Proposition~\ref{prop:attempted-competence-matrix} is load-bearing for the regime-conditional trilemma used later: if exact competence is blocked by hardness in a declared regime after an attempted exact procedure, integrity forces one of three responses---abstain, weaken guarantees, or change regime assumptions.
 
 \paragraph{Mechanized status.}
 This separation is machine-checked in \texttt{DecisionQuotient/IntegrityCompetence.lean} via:
 \texttt{competence\_implies\_integrity} and
-\texttt{integrity\_not\_competent\_of\_nonempty\_scope}.
+\texttt{integrity\_not\_competent\_of\_nonempty\_scope}; the attempted-competence matrix is mechanized via
+\texttt{overModelVerdict\_rational\_iff},
+\texttt{admissible\_matrix\_counts}, and
+\texttt{admissible\_irrational\_strictly\_more\_than\_rational}.
 
 
 % Include the hardness proofs (already developed)

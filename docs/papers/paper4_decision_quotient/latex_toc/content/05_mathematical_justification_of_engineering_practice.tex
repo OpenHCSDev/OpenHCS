@@ -6,6 +6,15 @@ Regime tags used below follow Section~\ref{sec:model-contract}: [S], [S+ETH], [E
 Any prescription that requires exact minimization is constrained by these theorem-level bounds.
 Theorem~\ref{thm:overmodel-diagnostic} implies that persistent failure to isolate a minimal sufficient set is a boundary-characterization signal in the current model, not a universal irreducibility claim.
 
+\paragraph{Conditional rationality criterion.}
+For the objective ``minimize verified total cost while preserving integrity,'' over-specification is rational only under \emph{attempted competence failure} in the active regime (Definition~\ref{def:attempted-competence-failure}): if exact irrelevance cannot be certified efficiently after an attempted exact procedure, integrity forbids uncertified exclusion. When exact competence is available in the active regime (e.g., Theorem~\ref{thm:tractable} and the exact-identifiability criterion), persistent over-specification is irrational relative to that objective because proven-irrelevant coordinates can be removed with certified correctness.
+Proposition~\ref{prop:attempted-competence-matrix} makes this explicit: in the integrity-preserving matrix, one cell is rational and three are irrational, so irrationality is the default verdict.
+\textit{(Lean anchors: \nolinkurl{IntegrityCompetence.competence_implies_integrity},
+\nolinkurl{IntegrityCompetence.integrity_not_competent_of_nonempty_scope},
+\nolinkurl{IntegrityCompetence.admissible_matrix_counts},
+\nolinkurl{ClaimClosure.tractable_subcases_conditional},
+\nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset}.)}
+
 \begin{remark}[Regime Contract for Engineering Corollaries]
 All claims in this section are formal corollaries under the declared model assumptions.
 \begin{itemize}
@@ -101,7 +110,7 @@ Therefore, there exists $n_0$ such that for all $n > n_0$, the finding-vs-mainte
 C_{\text{over}}(k) < C_{\text{find}}(n) + C_{\text{under}}
 \]
 
-Within [S+ETH], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary.
+Within [S+ETH], persistent over-specification is consistent with unresolved boundary characterization rather than a proof that all included parameters are intrinsically necessary. Conversely, when exact competence is available in the active regime, persistent over-specification is irrational for the same cost-minimization objective.
 \textit{(Lean handles: \nolinkurl{ClaimClosure.cost_asymmetry_eth_conditional},
 \nolinkurl{HardnessDistribution.linear_lt_exponential_plus_constant_eventually}.)}
 \end{theorem}
@@ -162,4 +171,9 @@ Theorems~\ref{thm:overmodel-diagnostic} and~\ref{thm:cost-asymmetry-eth} yield t
 
 \textbf{3. Full-parameter inclusion as an \(O(n)\) upper-bound strategy.} Under [S+ETH], if exact minimization is unresolved, including all \(n\) parameters incurs linear maintenance overhead while avoiding false irrelevance claims.
 
-These corollaries are direct consequences of the hardness/tractability landscape: to move beyond them, one must either shift to tractable regimes from Theorem~\ref{thm:tractable} or adopt explicit approximation commitments.
+\textbf{4. Irrationality outside attempted-competence-failure conditions.} If the active regime admits exact competence (tractable structural-access conditions or exact relevance identifiability), or if exact competence was never actually attempted, continued over-specification is not justified by hardness and is irrational relative to the stated objective.
+\textit{(Lean anchors: \nolinkurl{ClaimClosure.tractable_subcases_conditional},
+\nolinkurl{IntegrityCompetence.admissible_irrational_strictly_more_than_rational},
+\nolinkurl{Sigma2PHardness.exactlyIdentifiesRelevant_iff_sufficient_and_subset_relevantFinset}.)}
+
+These corollaries are direct consequences of the hardness/tractability landscape: over-specification is an attempted-competence-failure policy, not a default optimum. To move beyond it, one must either shift to tractable regimes from Theorem~\ref{thm:tractable} or adopt explicit approximation commitments.

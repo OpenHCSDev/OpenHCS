@@ -13,6 +13,7 @@
 -/
 
 import Mathlib.Data.Set.Basic
+import Mathlib.Data.Finset.Basic
 import Mathlib.Tactic
 
 namespace DecisionQuotient.IntegrityCompetence
@@ -96,5 +97,65 @@ theorem integrity_not_competent_of_nonempty_scope
       (Q := alwaysAbstain (X := X) (Y := Y) (W := W)) hComp x hx with ⟨y, w, hSolve⟩
   simp [alwaysAbstain] at hSolve
 
-end DecisionQuotient.IntegrityCompetence
+/-- Three-way policy verdict used for the attempted-competence matrix:
+    rational (conditionally justified), irrational, or inadmissible. -/
+inductive OverModelVerdict where
+  | rational
+  | irrational
+  | inadmissible
+  deriving DecidableEq, Repr
 
+/-- Attempted-competence matrix decision function.
+    Axes:
+    - integrity: whether assertions are integrity-preserving
+    - attempted: whether exact competence was actually attempted
+    - competenceAvailable: whether exact competence is available in the active regime
+-/
+def overModelVerdict (integrity attempted competenceAvailable : Bool) : OverModelVerdict :=
+  if integrity then
+    if attempted && (!competenceAvailable) then OverModelVerdict.rational
+    else OverModelVerdict.irrational
+  else OverModelVerdict.inadmissible
+
+/-- Rational cell characterization for the attempted-competence matrix. -/
+theorem overModelVerdict_rational_iff (integrity attempted competenceAvailable : Bool) :
+    overModelVerdict integrity attempted competenceAvailable = OverModelVerdict.rational ↔
+      integrity = true ∧ attempted = true ∧ competenceAvailable = false := by
+  cases integrity <;> cases attempted <;> cases competenceAvailable <;> decide
+
+/-- Irrational cell characterization for the attempted-competence matrix. -/
+theorem overModelVerdict_irrational_iff (integrity attempted competenceAvailable : Bool) :
+    overModelVerdict integrity attempted competenceAvailable = OverModelVerdict.irrational ↔
+      integrity = true ∧ (attempted = false ∨ competenceAvailable = true) := by
+  cases integrity <;> cases attempted <;> cases competenceAvailable <;> decide
+
+/-- Inadmissible cell characterization for the attempted-competence matrix. -/
+theorem overModelVerdict_inadmissible_iff (integrity attempted competenceAvailable : Bool) :
+    overModelVerdict integrity attempted competenceAvailable = OverModelVerdict.inadmissible ↔
+      integrity = false := by
+  cases integrity <;> cases attempted <;> cases competenceAvailable <;> decide
+
+/-- Number of rational cells in the integrity-preserving plane
+    (integrity fixed to true, axes: attempted × competenceAvailable). -/
+def admissibleRationalCount : Nat :=
+  (((Finset.univ : Finset Bool).product (Finset.univ : Finset Bool)).filter
+    (fun p => overModelVerdict true p.1 p.2 = OverModelVerdict.rational)).card
+
+/-- Number of irrational cells in the integrity-preserving plane
+    (integrity fixed to true, axes: attempted × competenceAvailable). -/
+def admissibleIrrationalCount : Nat :=
+  (((Finset.univ : Finset Bool).product (Finset.univ : Finset Bool)).filter
+    (fun p => overModelVerdict true p.1 p.2 = OverModelVerdict.irrational)).card
+
+/-- Count theorem for the integrity-preserving attempted-competence matrix:
+    exactly one rational cell and three irrational cells. -/
+theorem admissible_matrix_counts :
+    admissibleRationalCount = 1 ∧ admissibleIrrationalCount = 3 := by
+  native_decide
+
+/-- In the integrity-preserving plane, irrational cells strictly outnumber rational cells. -/
+theorem admissible_irrational_strictly_more_than_rational :
+    admissibleIrrationalCount > admissibleRationalCount := by
+  native_decide
+
+end DecisionQuotient.IntegrityCompetence
