@@ -137,6 +137,7 @@ theorem opt_falsifying (φ : Formula n) (a : Assignment n) (hfalse : φ.eval a =
 
 /-- The empty set of coordinates (we use a trivial 1-coordinate space) -/
 instance : CoordinateSpace (ReductionState n) 1 where
+  Coord := fun _ => Unit
   proj := fun _ _ => ()
 
 open ReductionAction ReductionState in
@@ -166,7 +167,9 @@ theorem sufficient_implies_tautology (φ : Formula n)
   intro a
   -- Compare assignment a with reference state
   -- They agree on ∅, so must have same Opt
-  have heq := hsuff (assignment a) reference (by intro i; exact Finset.not_mem_empty i |>.elim)
+  have heq := hsuff (assignment a) reference (by
+    intro i hi
+    exact (by simpa using hi))
   -- Reference has Opt = {accept}
   rw [opt_reference] at heq
   -- So assignment a must also have Opt = {accept}

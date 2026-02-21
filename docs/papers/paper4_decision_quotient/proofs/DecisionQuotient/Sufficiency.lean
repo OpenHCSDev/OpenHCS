@@ -82,7 +82,7 @@ theorem DecisionProblem.emptySet_sufficient_iff_constant (dp : DecisionProblem A
   · intro h s s'
     apply h
     intro i hi
-    exact absurd hi (Finset.not_mem_empty i)
+    exact (by simpa using hi)
   · intro h s s' _
     exact h s s'
 
@@ -162,7 +162,8 @@ theorem DecisionProblem.erase_of_not_mem [DecidableEq (Fin n)]
     (dp : DecisionProblem A S) (I : Finset (Fin n)) (i : Fin n)
     (hI : dp.isSufficient I) (hi : i ∉ I) :
     dp.isSufficient (I.erase i) := by
-  have heq : I.erase i = I := Finset.erase_eq_of_not_mem hi
+  have heq : I.erase i = I := by
+    simpa [hi]
   rw [heq]
   exact hI
 
@@ -275,8 +276,7 @@ theorem DecisionProblem.sufficientSets_principal'
   ext J
   constructor
   · -- If J is sufficient, then I ⊆ J
-    intro hJ
-    intro i hi
+    intro hJ i hi
     -- i ∈ I means i is relevant (by minimalSufficient_iff_relevant)
     have hrel : dp.isRelevant i := (dp.minimalSufficient_iff_relevant I hmin i).mp hi
     -- relevant coordinates must be in any sufficient set

@@ -51,7 +51,7 @@ theorem minimality_is_dof_minimization {D : Domain} (T : Theory D) :
         push_neg at h_not_le
         -- T_min is complete with smaller size → contradict minimal DOF assumption
         have h_smaller : T_min.size < T.size := by
-          rw [h_T_min_size] at h_not_le
+          rw [← h_T_min_size] at h_not_le
           exact h_not_le
         have h_T_min_cover : T_min.coversSet D.queries :=
           (coversSet_iff_isComplete T_min).2 h_T_min_complete
@@ -118,7 +118,7 @@ theorem theory_discovery_is_mechanical {D : Domain} [Finite D.Query] :
   exact equivalence_implies_isomorphism T1 T2 h1 h2 h_equiv
 
 /-- Data efficiency of minimal theories -/
-theorem minimal_theories_data_efficient {D : Domain} [Finite D.queries] :
+theorem minimal_theories_data_efficient {D : Domain} [Finite D.Query] :
     ∀ T : Theory D, T.isMinimal →
       ∃ k, ∀ ε > 0, ∃ n_samples ≤ k * T.size,
         True := by  -- Simplified statement

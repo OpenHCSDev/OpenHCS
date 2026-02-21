@@ -8,9 +8,10 @@ import Mathlib.Data.Fintype.Basic
 
 /-- Theorem 4.1: Incoherence of Pluralism -/
 theorem anti_pluralism (D : Domain) [Finite D.Query]
-    (T1 T2 : Theory D) (h1 : T1.isMinimal) (h2 : T2.isMinimal) :
+    (T1 T2 : Theory D) (h1 : T1.isMinimal) (h2 : T2.isMinimal)
+    (h_equiv : Theory.queryEquivalent T1 T2) :
     T1 ≅ T2 := by
-  exact theory_discovery_mechanical D T1 T2 h1 h2
+  exact theory_discovery_mechanical D T1 T2 h1 h2 h_equiv
 
 /-- Corollary 4.1: Convention vs Discovery -/
 theorem convention_vs_discovery {D : Domain} (T1 T2 : Theory D)
@@ -21,9 +22,10 @@ theorem convention_vs_discovery {D : Domain} (T1 T2 : Theory D)
 
 /-- Multiple distinct minimal theories cannot exist -/
 theorem no_multiple_minimal (D : Domain) [Finite D.Query] :
-    ¬∃ T1 T2 : Theory D, T1.isMinimal ∧ T2.isMinimal ∧ ¬(T1 ≅ T2) := by
-  intro ⟨T1, T2, h1, h2, h_not_iso⟩
-  have h_iso := anti_pluralism D T1 T2 h1 h2
+    ¬∃ T1 T2 : Theory D,
+      T1.isMinimal ∧ T2.isMinimal ∧ Theory.queryEquivalent T1 T2 ∧ ¬(T1 ≅ T2) := by
+  intro ⟨T1, T2, h1, h2, h_equiv, h_not_iso⟩
+  have h_iso := anti_pluralism D T1 T2 h1 h2 h_equiv
   exact h_not_iso h_iso
 
 /-- Isomorphic theories differ only in notation -/
@@ -53,7 +55,7 @@ theorem intrinsic_dimension_bounded : ∀ {D : Domain} [Fintype D.Query],
   simpa [Domain.intrinsicDimension, T] using h_le
 
 /-- Theorem 4.2: Learnability -/
-theorem minimal_theory_learnable (D : Domain) [Finite D.Query] :
+theorem minimal_theory_learnable (D : Domain) [Fintype D.Query] :
     ∃ (sample_size : ℕ), 
       ∀ (T : Theory D), T.isMinimal → T.size ≤ sample_size := by
   -- Sample complexity is bounded by query space size
@@ -64,4 +66,4 @@ theorem minimal_theory_learnable (D : Domain) [Finite D.Query] :
   have h_size := h_min.2.1
   rw [h_size]
   -- intrinsicDimension ≤ |Query| (by axiom)
-  exact intrinsic_dimension_bounded
+  exact intrinsic_dimension_bounded (D := D)

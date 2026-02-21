@@ -102,7 +102,7 @@ theorem minimality_characterization {D : Domain} (T : Theory D) :
           have h_min_covers : T_min.coversSet D.queries :=
             (coversSet_iff_isComplete T_min).2 h_min_complete
           have h_size_lt : T_min.size < T.size := by
-            rw [h_min_size] at h_not_le
+            rw [← h_min_size] at h_not_le
             exact h_not_le
           -- allComponentsRequired says any smaller theory fails to cover some query
           obtain ⟨q, h_q_in, h_not_cover⟩ := h_all_req T_min h_size_lt

@@ -51,13 +51,12 @@ noncomputable def uniform (n : ℕ) (hn : n > 0) : FiniteDist n where
       · exact Nat.cast_pos.mpr hn
     exact le_of_lt h
   sum_one := by
-    calc
-      ∑ i : Fin n, (1 : ℝ) / n
-      _ = (n : ℝ) * ((1 : ℝ) / n) := by
-        rw [Finset.sum_const, Finset.card_fin]
-      _ = 1 := by
-        field_simp
-        exact Nat.cast_ne_zero.mpr (Ne.symm (Nat.ne_of_gt hn))
+    rw [Finset.sum_const, Finset.card_fin]
+    have hn0 : (n : ℝ) ≠ 0 := by
+      exact_mod_cast (Nat.ne_of_gt hn)
+    have hmul : (n : ℝ) * ((1 : ℝ) / n) = 1 := by
+      field_simp [hn0]
+    simpa [nsmul_eq_mul] using hmul
 
 end FiniteDist
 
