@@ -401,4 +401,73 @@ theorem emptySufficiency_query_indistinguishable_pair {n : ℕ}
     exact hs0_notin (hEq ▸ hsQ)
   rw [constTrueProblem_opt (n := n) s, spikeProblem_opt_off (n := n) s0 s hs_ne]
 
+/-! ## Value-entry oracle extension (broader query-access model)
+
+We lift the same indistinguishability pattern to value-entry queries `(a, s) ↦ U(a,s)`.
+This broadens the intermediate query regime beyond direct `Opt` access.
+-/
+
+/-- Value-entry query type for Boolean-action problems. -/
+abbrev ValueQueryState (n : ℕ) := Bool × (Fin n → Bool)
+
+/-- States touched by an entry-query set. -/
+def touchedStates {n : ℕ} (Q : Finset (ValueQueryState n)) : Finset (Fin n → Bool) :=
+  Q.image Prod.snd
+
+/-- Number of touched states is at most number of entry queries. -/
+theorem touchedStates_card_le_query_card {n : ℕ} (Q : Finset (ValueQueryState n)) :
+    (touchedStates Q).card ≤ Q.card := by
+  unfold touchedStates
+  exact Finset.card_image_le
+
+/-- Oracle view for value-entry queries. -/
+def valueEntryView {n : ℕ} (Q : Finset (ValueQueryState n))
+    (dp : DecisionProblem Bool (Fin n → Bool)) :
+    {q // q ∈ Q} → ℝ :=
+  fun q => dp.utility q.1.1 q.1.2
+
+/-- If a hidden state is untouched, const/spike instances are entry-indistinguishable on Q. -/
+theorem valueEntryView_eq_if_hidden_untouched {n : ℕ}
+    (Q : Finset (ValueQueryState n)) (s0 : Fin n → Bool)
+    (hs0_notin : s0 ∉ touchedStates Q) :
+    valueEntryView Q (constTrueProblem (n := n)) =
+      valueEntryView Q (spikeProblem (n := n) s0) := by
+  funext q
+  have hs_mem : q.1.2 ∈ touchedStates Q := by
+    unfold touchedStates
+    exact Finset.mem_image.mpr ⟨q.1, q.2, rfl⟩
+  have hs_ne : q.1.2 ≠ s0 := by
+    intro hEq
+    exact hs0_notin (hEq ▸ hs_mem)
+  cases q.1.1 <;> simp [valueEntryView, constTrueProblem, spikeProblem, hs_ne]
+
+/-- Strong lower-bound core for the value-entry oracle model.
+With fewer than `2^n` value-entry queries, there exists an unqueried hidden state
+yielding two entry-indistinguishable instances with opposite truth values for
+`I = ∅` sufficiency. -/
+theorem emptySufficiency_valueEntry_indistinguishable_pair {n : ℕ}
+    (hn : 0 < n) (Q : Finset (ValueQueryState n))
+    (hQ : Q.card < Fintype.card (Fin n → Bool)) :
+    ∃ s0 : Fin n → Bool,
+      s0 ∉ touchedStates Q ∧
+      (valueEntryView Q (constTrueProblem (n := n)) =
+        valueEntryView Q (spikeProblem (n := n) s0)) ∧
+      (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+      ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n)) := by
+  have hTouchedLt : (touchedStates Q).card < Fintype.card (Fin n → Bool) := by
+    exact lt_of_le_of_lt (touchedStates_card_le_query_card Q) hQ
+  have hsubset : touchedStates Q ⊆ (Finset.univ : Finset (Fin n → Bool)) := by
+    intro s hs
+    exact Finset.mem_univ s
+  have hsdiff : (Finset.univ \ touchedStates Q).card =
+      Fintype.card (Fin n → Bool) - (touchedStates Q).card := by
+    simpa using Finset.card_sdiff hsubset
+  have hpos : 0 < (Finset.univ \ touchedStates Q).card := by
+    rw [hsdiff]
+    exact Nat.sub_pos_of_lt hTouchedLt
+  rcases Finset.card_pos.mp hpos with ⟨s0, hs0_mem⟩
+  have hs0_notin : s0 ∉ touchedStates Q := (Finset.mem_sdiff.mp hs0_mem).2
+  refine ⟨s0, hs0_notin, ?_, constTrue_empty_sufficient (n := n), spike_empty_not_sufficient (n := n) hn s0⟩
+  exact valueEntryView_eq_if_hidden_untouched Q s0 hs0_notin
+
 end DecisionQuotient
