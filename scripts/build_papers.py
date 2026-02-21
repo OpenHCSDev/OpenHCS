@@ -1041,6 +1041,7 @@ class PaperBuilder:
             latex_input = content
 
         latex_input = self._expand_lean_stat_macros(latex_input, paper_id)
+        latex_input = self._prepend_markdown_macro_prelude(latex_input)
         result = subprocess.run(
             ["pandoc", "-f", "latex", "-t", "markdown", "--wrap=none", "--columns=100"],
             input=latex_input,
@@ -1049,10 +1050,41 @@ class PaperBuilder:
         )
 
         if result.returncode == 0 and result.stdout:
-            out_file.write(result.stdout)
+            out_file.write(self._postprocess_markdown_text(result.stdout))
             out_file.write("\n\n")
         else:
             out_file.write(f"_Failed to convert {tex_file.name}_\n\n")
+
+    def _prepend_markdown_macro_prelude(self, latex_input: str) -> str:
+        """Prepend markdown-only macro normalizations for pandoc conversion.
+
+        Markdown conversion processes section files directly, without the main
+        LaTeX preamble. Custom macros used in prose (e.g., ``\\coNP``) would
+        otherwise be dropped by pandoc, producing broken text such as
+        ``-complete``. We define plain/math-safe expansions here strictly for
+        conversion fidelity.
+        """
+        prelude = "\n".join(
+            [
+                r"\newcommand{\coNP}{coNP}",
+                r"\newcommand{\NP}{NP}",
+                r"\newcommand{\Pclass}{P}",
+                r"\newcommand{\SigmaP}[1]{\Sigma_{#1}^{P}}",
+                r"\newcommand{\PiP}[1]{\Pi_{#1}^{P}}",
+                r"\newcommand{\Opt}{\operatorname{Opt}}",
+            ]
+        )
+        return f"{prelude}\n{latex_input}"
+
+    def _postprocess_markdown_text(self, text: str) -> str:
+        """Normalize small TeX-to-markdown spacing artifacts.
+
+        TeX control-word macros consume following spaces unless braced. When
+        class macros appear in prose (e.g., ``\\coNP characterization``), the
+        converted markdown can become concatenated (``coNPcharacterization``).
+        Insert the missing separator for known complexity-class tokens.
+        """
+        return re.sub(r"\bcoNP(?=[A-Za-z])", "coNP ", text)
 
     def _update_paper_date(self, tex_file: Path):
         """Update publication date in LaTeX file using regex for correct replacement."""

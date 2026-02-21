@@ -6,11 +6,11 @@
 
 ## Abstract
 
-We characterize the computational complexity of coordinate sufficiency in decision problems within the formal model. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $U: A \times S \to \mathbb{Q}$, a coordinate set $I$ is *sufficient* if $s_I = s'_I \implies \Opt(s) = \Opt(s')$.
+We characterize the computational complexity of coordinate sufficiency in decision problems within the formal model. Given action set $A$, state space $S = X_1 \times \cdots \times X_n$, and utility $U: A \times S \to \mathbb{Q}$, a coordinate set $I$ is *sufficient* if $s_I = s'_I \implies \operatorname{Opt}(s) = \operatorname{Opt}(s')$.
 
 **The landscape in the formal model:**
 
--   **General case:** SUFFICIENCY-CHECK is -complete; ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete.
+-   **General case:** SUFFICIENCY-CHECK is coNP-complete; ANCHOR-SUFFICIENCY is $\Sigma_{2}^{P}$-complete.
 
 -   **Tractable cases:** Polynomial-time for bounded action sets under the explicit-state encoding; separable utilities ($U = f + g$) under any encoding; and tree-structured utility with explicit local factors.
 
@@ -18,7 +18,7 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is robust under finite-support randomization (seedwise and weighted forms), with explicit oracle-lattice transfer/strictness statements.
 
-The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
+The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a coNP characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
@@ -29,18 +29,18 @@ The reduction constructions and key equivalence theorems are machine-checked in 
 
 # Introduction {#sec:introduction}
 
-Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$. A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if knowing only coordinates in $I$ determines the optimal action: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$
+Consider a decision problem with actions $A$ and states $S = X_1 \times \cdots \times X_n$. A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* if knowing only coordinates in $I$ determines the optimal action: $$s_I = s'_I \implies \operatorname{Opt}(s) = \operatorname{Opt}(s')$$
 
 This paper characterizes the efficient cases of coordinate sufficiency within the formal model:
 
 Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} fixes the computational model and input encodings used for all complexity claims. Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} gives the model contract and regime tags used to type every strong claim.
 
 ::: center
-  **Problem**              **Complexity**          **When Tractable**
-  ------------------------ ----------------------- ------------------------------------------------------------------------------
-  SUFFICIENCY-CHECK        -complete               Bounded actions (explicit-state), separable utility, tree-structured utility
-  MINIMUM-SUFFICIENT-SET   -complete               Same conditions
-  ANCHOR-SUFFICIENCY       $\SigmaP{2}$-complete   Open
+  **Problem**              **Complexity**              **When Tractable**
+  ------------------------ --------------------------- ------------------------------------------------------------------------------
+  SUFFICIENCY-CHECK        coNP-complete               Bounded actions (explicit-state), separable utility, tree-structured utility
+  MINIMUM-SUFFICIENT-SET   coNP-complete               Same conditions
+  ANCHOR-SUFFICIENCY       $\Sigma_{2}^{P}$-complete   Open
 :::
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Outside those regimes, the succinct model yields hardness.
@@ -53,7 +53,7 @@ Theorems in this paper are intended to be read as hardness/recovery pairs for th
 
 2.  **Minimal sufficient sets:** \[S\] coNP-complete in general (Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}), paired with the collapse criterion and relevance-computation recovery route (Theorems [\[thm:minsuff-collapse\]](#thm:minsuff-collapse){reference-type="ref" reference="thm:minsuff-collapse"}, [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
-3.  **Anchor sufficiency:** $\SigmaP{2}$-complete in the general anchored formulation (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}); no general polynomial-time recovery condition is established in this model.
+3.  **Anchor sufficiency:** $\Sigma_{2}^{P}$-complete in the general anchored formulation (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}); no general polynomial-time recovery condition is established in this model.
 
 *(Lean anchors for this map: `ClaimClosure.sufficiency_conp_complete_conditional`, `ClaimClosure.minsuff_conp_complete_conditional`, `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `ClaimClosure.tractable_subcases_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`.)*
 
@@ -69,11 +69,11 @@ An operational criterion follows later from the same chain: once decision-site c
 
 3.  **Tree-structured utility**: With explicit local factors over a tree, dynamic programming yields polynomial algorithms in the input length.
 
-Each condition is stated with its encoding assumption. Outside these regimes, the general problem remains -hard (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
+Each condition is stated with its encoding assumption. Outside these regimes, the general problem remains coNP-hard (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
-**When is it intractable?** The general problem is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), with a separation between explicit-state tractability and succinct worst-case hardness:
+**When is it intractable?** The general problem is coNP-complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), with a separation between explicit-state tractability and succinct worst-case hardness:
 
--   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
+-   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\operatorname{Opt}(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
 -   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer, weighted randomized robustness, and oracle-lattice transfer/strictness theorems (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:oracle-lattice-strict\]](#prop:oracle-lattice-strict){reference-type="ref" reference="prop:oracle-lattice-strict"}).
 
@@ -83,11 +83,11 @@ The explicit ETH lower bound is still a succinct worst-case statement; Propositi
 
 ## Main Theorems
 
-1.  **Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}:** SUFFICIENCY-CHECK is -complete via reduction from TAUTOLOGY.
+1.  **Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}:** SUFFICIENCY-CHECK is coNP-complete via reduction from TAUTOLOGY.
 
-2.  **Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}:** MINIMUM-SUFFICIENT-SET is -complete (the $\SigmaP{2}$ structure collapses).
+2.  **Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}:** MINIMUM-SUFFICIENT-SET is coNP-complete (the $\Sigma_{2}^{P}$ structure collapses).
 
-3.  **Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}:** ANCHOR-SUFFICIENCY is $\SigmaP{2}$-complete via reduction from $\exists\forall$-SAT.
+3.  **Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}:** ANCHOR-SUFFICIENCY is $\Sigma_{2}^{P}$-complete via reduction from $\exists\forall$-SAT.
 
 4.  **Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}:** Encoding-regime separation: explicit-state polynomial-time (polynomial in $|S|$), and under ETH a succinct worst-case lower bound witnessed by a hard family with $k^* = n$.
 
@@ -131,13 +131,13 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 :::
 
 ::: definition
-[]{#def:optimizer label="def:optimizer"} For state $s \in S$, the *optimal action set* is: $$\Opt(s) := \arg\max_{a \in A} U(a, s) = \{a \in A : U(a,s) = \max_{a' \in A} U(a', s)\}$$
+[]{#def:optimizer label="def:optimizer"} For state $s \in S$, the *optimal action set* is: $$\operatorname{Opt}(s) := \arg\max_{a \in A} U(a, s) = \{a \in A : U(a,s) = \max_{a' \in A} U(a', s)\}$$
 :::
 
 ## Sufficiency and Relevance
 
 ::: definition
-[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \Opt(s) = \Opt(s')$$ Equivalently, the optimal action depends only on coordinates in $I$. In this paper, this set-valued invariance of the full optimal-action correspondence is the primary decision-relevance target.
+[]{#def:sufficient label="def:sufficient"} A coordinate set $I \subseteq \{1, \ldots, n\}$ is *sufficient* for decision problem $\mathcal{D}$ if: $$\forall s, s' \in S: \quad s_I = s'_I \implies \operatorname{Opt}(s) = \operatorname{Opt}(s')$$ Equivalently, the optimal action depends only on coordinates in $I$. In this paper, this set-valued invariance of the full optimal-action correspondence is the primary decision-relevance target.
 :::
 
 ::: definition
@@ -145,7 +145,7 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 :::
 
 ::: definition
-[]{#def:selector-sufficient label="def:selector-sufficient"} For fixed selector $\sigma$, a coordinate set $I$ is *selector-sufficient* if $$\forall s,s' \in S:\quad s_I=s'_I \implies \sigma(\Opt(s))=\sigma(\Opt(s')).$$
+[]{#def:selector-sufficient label="def:selector-sufficient"} For fixed selector $\sigma$, a coordinate set $I$ is *selector-sufficient* if $$\forall s,s' \in S:\quad s_I=s'_I \implies \sigma(\operatorname{Opt}(s))=\sigma(\operatorname{Opt}(s')).$$
 :::
 
 ::: proposition
@@ -153,13 +153,13 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 :::
 
 ::: proof
-*Proof.* If $I$ is sufficient, then $s_I=s'_I$ implies $\Opt(s)=\Opt(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions. ◻
+*Proof.* If $I$ is sufficient, then $s_I=s'_I$ implies $\operatorname{Opt}(s)=\operatorname{Opt}(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions. ◻
 :::
 
 ::: definition
-[]{#def:epsilon-sufficiency label="def:epsilon-sufficiency"} For $\varepsilon \ge 0$, define $$\Opt_\varepsilon(s)
+[]{#def:epsilon-sufficiency label="def:epsilon-sufficiency"} For $\varepsilon \ge 0$, define $$\operatorname{Opt}_\varepsilon(s)
 :=
-\{a\in A:\forall a'\in A,\ U(a',s)\le U(a,s)+\varepsilon\}.$$ Coordinate set $I$ is *$\varepsilon$-sufficient* if $$\forall s,s'\in S:\ s_I=s'_I \implies \Opt_\varepsilon(s)=\Opt_\varepsilon(s').$$
+\{a\in A:\forall a'\in A,\ U(a',s)\le U(a,s)+\varepsilon\}.$$ Coordinate set $I$ is *$\varepsilon$-sufficient* if $$\forall s,s'\in S:\ s_I=s'_I \implies \operatorname{Opt}_\varepsilon(s)=\operatorname{Opt}_\varepsilon(s').$$
 :::
 
 ::: proposition
@@ -177,7 +177,7 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 ::: definition
 []{#def:relevant label="def:relevant"} Coordinate $i$ is *relevant* if there exist states that differ only at coordinate $i$ and induce different optimal action sets: $$i \text{ is relevant}
 \iff
-\exists s,s' \in S:\; \Big(\forall j \neq i,\; s_j = s'_j\Big)\ \wedge\ \Opt(s)\neq\Opt(s').$$
+\exists s,s' \in S:\; \Big(\forall j \neq i,\; s_j = s'_j\Big)\ \wedge\ \operatorname{Opt}(s)\neq\operatorname{Opt}(s').$$
 :::
 
 ::: proposition
@@ -211,15 +211,15 @@ The minimal sufficient set is $I = \{1\}$ (only rain forecast matters). Coordina
 :::
 
 ::: definition
-[]{#def:decision-quotient label="def:decision-quotient"} The *decision quotient* for state $s$ under coordinate set $I$ is: $$\text{DQ}_I(s) = \frac{|\{a \in A : a \in \Opt(s') \text{ for some } s' \sim_I s\}|}{|A|}$$ This measures the fraction of actions that are optimal for at least one state consistent with $I$.
+[]{#def:decision-quotient label="def:decision-quotient"} The *decision quotient* for state $s$ under coordinate set $I$ is: $$\text{DQ}_I(s) = \frac{|\{a \in A : a \in \operatorname{Opt}(s') \text{ for some } s' \sim_I s\}|}{|A|}$$ This measures the fraction of actions that are optimal for at least one state consistent with $I$.
 :::
 
 ::: proposition
-[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\Opt(s)|/|A|$ for all $s \in S$. *(Lean finite-model form: `ClaimClosure.sufficiency_iff_dq_ratio`, `ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt`)*
+[]{#prop:sufficiency-char label="prop:sufficiency-char"} Coordinate set $I$ is sufficient if and only if $\text{DQ}_I(s) = |\operatorname{Opt}(s)|/|A|$ for all $s \in S$. *(Lean finite-model form: `ClaimClosure.sufficiency_iff_dq_ratio`, `ClaimClosure.sufficiency_iff_projectedOptCover_eq_opt`)*
 :::
 
 ::: proof
-*Proof.* If $I$ is sufficient, then $s \sim_I s' \implies \Opt(s) = \Opt(s')$, so the set of actions optimal for some $s' \sim_I s$ is exactly $\Opt(s)$.
+*Proof.* If $I$ is sufficient, then $s \sim_I s' \implies \operatorname{Opt}(s) = \operatorname{Opt}(s')$, so the set of actions optimal for some $s' \sim_I s$ is exactly $\operatorname{Opt}(s)$.
 
 Conversely, if the condition holds, then for any $s \sim_I s'$, the optimal actions form the same set (since $\text{DQ}_I(s) = \text{DQ}_I(s')$ and both equal the relative size of the common optimal set). ◻
 :::
@@ -238,7 +238,7 @@ This succinct circuit encoding is the standard representation for decision probl
 
 -   a Boolean or arithmetic circuit $C_U$ that on input $(a,s)$ outputs $U(a,s)$.
 
-The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and all complexity classes (, $\Sigma_2^P$, ETH) are measured in $L$. All hardness results in Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} use this encoding.
+The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and all complexity classes (coNP, $\Sigma_2^P$, ETH) are measured in $L$. All hardness results in Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} use this encoding.
 
 #### Explicit-state encoding (used for enumeration algorithms and experiments).
 
@@ -246,7 +246,7 @@ The utility is given as a full table over $A \times S$. The input length is $L_{
 
 #### Query-access regime (intermediate black-box access).
 
-The solver is given oracle access to decision information at queried states (e.g., $\Opt(s)$, or $U(a,s)$ with $\Opt(s)$ reconstructed from finitely many value queries). Complexity is measured by oracle-query count (optionally paired with per-query evaluation cost). This separates representational access from full-table availability and from succinct-circuit input length.
+The solver is given oracle access to decision information at queried states (e.g., $\operatorname{Opt}(s)$, or $U(a,s)$ with $\operatorname{Opt}(s)$ reconstructed from finitely many value queries). Complexity is measured by oracle-query count (optionally paired with per-query evaluation cost). This separates representational access from full-table availability and from succinct-circuit input length.
 
 Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
 
@@ -260,7 +260,7 @@ All theorem statements in this paper are typed by the following model contract:
 
 -   **C3 (evaluable utility):** $U(a,s)$ is computable from the declared input encoding.
 
--   **C4 (fixed decision semantics):** optimality is defined by $\Opt(s)=\arg\max_a U(a,s)$.
+-   **C4 (fixed decision semantics):** optimality is defined by $\operatorname{Opt}(s)=\arg\max_a U(a,s)$.
 
 We use short regime tags for applied corollaries:
 
@@ -307,7 +307,7 @@ Then the induced optimization problem is exactly the static decision problem of 
 :::
 
 ::: proof
-*Proof.* Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\Opt(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\Opt$ from Definition [\[def:optimizer\]](#def:optimizer){reference-type="ref" reference="def:optimizer"}, and the invariance condition "same projection implies same optimal choice set" is exactly Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}. ◻
+*Proof.* Under (1)--(3), optimizing $J$ at state $s$ is identical to choosing an action in $\arg\max_{a\in A} U(a,s)=\operatorname{Opt}(s)$. Condition (4) removes any dependence on future transition effects. Therefore the optimal-policy relation in the adjacent formulation coincides pointwise with $\operatorname{Opt}$ from Definition [\[def:optimizer\]](#def:optimizer){reference-type="ref" reference="def:optimizer"}, and the invariance condition "same projection implies same optimal choice set" is exactly Definition [\[def:sufficient\]](#def:sufficient){reference-type="ref" reference="def:sufficient"}. ◻
 :::
 
 ::: proposition
@@ -632,7 +632,7 @@ The modeling budget for deciding what to model is therefore a computationally co
 ## Quantifier Collapse for MINIMUM-SUFFICIENT-SET
 
 ::: theorem
-[]{#thm:minsuff-collapse label="thm:minsuff-collapse"} The apparent second-level predicate $$\exists I \, (|I| \leq k) \; \forall s,s' \in S:\; s_I = s'_I \implies \Opt(s)=\Opt(s')$$ is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where $$\text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \Opt(s)\neq\Opt(s')\}.$$ Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation. *(Lean handles: `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_collapse_to_conp_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`.)*
+[]{#thm:minsuff-collapse label="thm:minsuff-collapse"} The apparent second-level predicate $$\exists I \, (|I| \leq k) \; \forall s,s' \in S:\; s_I = s'_I \implies \operatorname{Opt}(s)=\operatorname{Opt}(s')$$ is equivalent to the coNP predicate $|\text{Relevant}| \le k$, where $$\text{Relevant} = \{i : \exists s,s'.\; s \text{ differs from } s' \text{ only at } i \text{ and } \operatorname{Opt}(s)\neq\operatorname{Opt}(s')\}.$$ Consequently, MINIMUM-SUFFICIENT-SET is governed by coNP certificates rather than a genuine $\Sigma_2^P$ alternation. *(Lean handles: `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_collapse_to_conp_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`.)*
 :::
 
 ::: proof
@@ -667,7 +667,7 @@ Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm
 :::
 
 ::: proof
-*Proof.* **Part 1 (Explicit-state upper bound):** Under the explicit-state encoding, SUFFICIENCY-CHECK is decidable in time polynomial in $N$ by direct enumeration: compute $\Opt(s)$ for all $s\in S$ and then check all pairs $(s,s')$ with $s_I=s'_I$.
+*Proof.* **Part 1 (Explicit-state upper bound):** Under the explicit-state encoding, SUFFICIENCY-CHECK is decidable in time polynomial in $N$ by direct enumeration: compute $\operatorname{Opt}(s)$ for all $s\in S$ and then check all pairs $(s,s')$ with $s_I=s'_I$.
 
 Equivalently, for any fixed $I$, the projection map $s\mapsto s_I$ has image size $|S_I|\le |S|=N$, so any algorithm that iterates over projection classes (or over all state pairs) runs in polynomial time in $N$. Thus, in particular, when $k^*=O(\log N)$, SUFFICIENCY-CHECK is solvable in polynomial time under the explicit-state encoding.
 
@@ -749,7 +749,7 @@ Consequently, no deterministic query procedure using fewer than $2^n$ state quer
 :::
 
 ::: remark
-Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} and Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, query access yields $\Omega(2^n)$ lower bounds in mechanized Boolean submodels (for both 'Opt' and value-entry interfaces), and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
+Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} and Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \operatorname{Opt}(s)$, query access yields $\Omega(2^n)$ lower bounds in mechanized Boolean submodels (for both 'Opt' and value-entry interfaces), and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
 :::
 
 This regime-typed landscape identifies tractability under \[E\], intermediate \[Q_bool\] lower bounds for two oracle interfaces, and worst-case intractability under \[S+ETH\] for the same underlying decision relation.
@@ -757,7 +757,7 @@ This regime-typed landscape identifies tractability under \[E\], intermediate \[
 
 # Tractable Special Cases: When You Can Solve It {#sec:tractable}
 
-We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. The tractability results below state the model assumption explicitly. Structural insight: hardness dissolves exactly when the full decision boundary $s \mapsto \Opt(s)$ is recoverable in polynomial time from the input representation; the three cases below instantiate this single principle. Concretely, each tractable regime corresponds to a specific structural insight (explicit boundary exposure, additive separability, or tree factorization) that removes the hardness witness; this supports reading the general-case hardness as missing structural access in the current representation rather than as an intrinsic semantic barrier.
+We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. The tractability results below state the model assumption explicitly. Structural insight: hardness dissolves exactly when the full decision boundary $s \mapsto \operatorname{Opt}(s)$ is recoverable in polynomial time from the input representation; the three cases below instantiate this single principle. Concretely, each tractable regime corresponds to a specific structural insight (explicit boundary exposure, additive separability, or tree factorization) that removes the hardness witness; this supports reading the general-case hardness as missing structural access in the current representation rather than as an intrinsic semantic barrier.
 
 ::: theorem
 []{#thm:tractable label="thm:tractable"} SUFFICIENCY-CHECK is polynomial-time solvable in the following cases:
@@ -774,13 +774,13 @@ We distinguish the encodings of Section [\[sec:encoding\]](#sec:encoding){refer
 ## Explicit-State Encoding
 
 ::: proof
-*Proof of Part 1.* Given the full table of $U(a,s)$, compute $\Opt(s)$ for all $s \in S$ in $O(|S||A|)$ time. For SUFFICIENCY-CHECK on a given $I$, verify that for all pairs $(s,s')$ with $s_I = s'_I$, we have $\Opt(s) = \Opt(s')$. This takes $O(|S|^2|A|)$ time by direct enumeration and is polynomial in the explicit input length. If $|A|$ is constant, the runtime is $O(|S|^2)$. ◻
+*Proof of Part 1.* Given the full table of $U(a,s)$, compute $\operatorname{Opt}(s)$ for all $s \in S$ in $O(|S||A|)$ time. For SUFFICIENCY-CHECK on a given $I$, verify that for all pairs $(s,s')$ with $s_I = s'_I$, we have $\operatorname{Opt}(s) = \operatorname{Opt}(s')$. This takes $O(|S|^2|A|)$ time by direct enumeration and is polynomial in the explicit input length. If $|A|$ is constant, the runtime is $O(|S|^2)$. ◻
 :::
 
 ## Separable Utility
 
 ::: proof
-*Proof of Part 2.* If $U(a, s) = f(a) + g(s)$, then: $$\Opt(s) = \arg\max_{a \in A} [f(a) + g(s)] = \arg\max_{a \in A} f(a)$$ The optimal action is independent of the state. Thus $I = \emptyset$ is always sufficient. ◻
+*Proof of Part 2.* If $U(a, s) = f(a) + g(s)$, then: $$\operatorname{Opt}(s) = \arg\max_{a \in A} [f(a) + g(s)] = \arg\max_{a \in A} f(a)$$ The optimal action is independent of the state. Thus $I = \emptyset$ is always sufficient. ◻
 :::
 
 ## Tree-Structured Utility
@@ -841,13 +841,13 @@ Real engineering problems reduce directly to the decision problems studied in th
 
 -   Sentinel utility $U(\bot,s)=1$ iff no behavior in $B$ occurs under configuration $s$, else $0$
 
-Then $$\Opt(s)=
+Then $$\operatorname{Opt}(s)=
 \begin{cases}
 \{b \in B : b \text{ occurs under configuration } s\}, & \text{if this set is nonempty},\\
 \{\bot\}, & \text{otherwise}.
 \end{cases}$$ So the optimizer map exactly encodes observed-behavior equivalence classes, including the empty-behavior case.
 
-Coordinate set $I$ is sufficient iff: $$s_I = s'_I \implies \Opt(s) = \Opt(s')$$
+Coordinate set $I$ is sufficient iff: $$s_I = s'_I \implies \operatorname{Opt}(s) = \operatorname{Opt}(s')$$
 
 This holds iff configurations agreeing on parameters in $I$ exhibit identical behaviors.
 
@@ -919,7 +919,7 @@ For any fixed nonnegative $C_{\text{under}}$, the asymptotic dominance inequalit
 :::
 
 ::: corollary
-[]{#cor:no-auto-minimize label="cor:no-auto-minimize"} Assuming $\Pclass \neq \coNP$, there exists no polynomial-time algorithm that:
+[]{#cor:no-auto-minimize label="cor:no-auto-minimize"} Assuming $P\neq coNP$, there exists no polynomial-time algorithm that:
 
 1.  Takes an arbitrary configuration file with $n$ parameters
 
@@ -931,11 +931,11 @@ For any fixed nonnegative $C_{\text{under}}$, the asymptotic dominance inequalit
 :::
 
 ::: proof
-*Proof.* Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contradicting Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} (assuming $\Pclass \neq \coNP$). ◻
+*Proof.* Such an algorithm would solve MINIMUM-SUFFICIENT-SET in polynomial time, contradicting Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} (assuming $P\neq coNP$). ◻
 :::
 
 ::: remark
-Corollary [\[cor:no-auto-minimize\]](#cor:no-auto-minimize){reference-type="ref" reference="cor:no-auto-minimize"} is a formal boundary statement: an always-correct polynomial-time minimizer for arbitrary succinct inputs would collapse $\Pclass$ and $\coNP$.
+Corollary [\[cor:no-auto-minimize\]](#cor:no-auto-minimize){reference-type="ref" reference="cor:no-auto-minimize"} is a formal boundary statement: an always-correct polynomial-time minimizer for arbitrary succinct inputs would collapse $P$ and $coNP$.
 :::
 
 ::: remark
@@ -1232,7 +1232,7 @@ The next section develops the major practical consequence of this framework: the
 The load-bearing fact in this section is not the set identity itself; it is the difficulty of shrinking the required set $R(P)$ in the first place. By Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} (and Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} for minimization), exact relevance identification is intractable in the worst case under succinct encoding. The identities below therefore quantify how unresolved relevance is redistributed between central and per-site work.
 
 ::: definition
-Let $R(P)$ be the required dimensions (those affecting $\Opt$) and $A(M)$ the dimensions model $M$ handles natively. The *expressive gap* is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
+Let $R(P)$ be the required dimensions (those affecting $\operatorname{Opt}$) and $A(M)$ the dimensions model $M$ handles natively. The *expressive gap* is $\text{Gap}(M,P) = R(P) \setminus A(M)$.
 :::
 
 ::: definition
@@ -1300,7 +1300,7 @@ Closest to our contribution is the feature-selection/model-selection hardness li
 
 ## Feature Selection
 
-In machine learning, feature selection asks which input features are relevant for prediction. This is known to be NP-hard in general [@blum1997selection]. Our results show the decision-theoretic analog is -complete for both checking and minimization.
+In machine learning, feature selection asks which input features are relevant for prediction. This is known to be NP-hard in general [@blum1997selection]. Our results show the decision-theoretic analog is coNP-complete for both checking and minimization.
 
 ## Value of Information
 
@@ -1323,7 +1323,7 @@ The feasibility qualifier in Definition [\[def:competence-regime\]](#def:compet
 
 ## Methodology and Disclosure {#methodology-and-disclosure .unnumbered}
 
-**Role of LLMs in this work.** This paper was developed through human-AI collaboration. The author provided the core intuitions---the connection between decision-relevance and computational complexity, the conjecture that SUFFICIENCY-CHECK is -complete, and the insight that the $\SigmaP{2}$ structure collapses for MINIMUM-SUFFICIENT-SET. Large language models (Claude, GPT-4) served as implementation partners for proof drafting, Lean formalization, and LaTeX generation.
+**Role of LLMs in this work.** This paper was developed through human-AI collaboration. The author provided the core intuitions---the connection between decision-relevance and computational complexity, the conjecture that SUFFICIENCY-CHECK is coNP-complete, and the insight that the $\Sigma_{2}^{P}$ structure collapses for MINIMUM-SUFFICIENT-SET. Large language models (Claude, GPT-4) served as implementation partners for proof drafting, Lean formalization, and LaTeX generation.
 
 The Lean 4 proofs were iteratively refined: the author specified the target statements, the LLM proposed proof strategies, and the Lean compiler served as the arbiter of correctness. The complexity-theoretic reductions required careful human oversight to ensure the polynomial bounds were correctly established.
 
@@ -1342,11 +1342,11 @@ The proofs are machine-checked; their validity is independent of generation meth
 
 This paper establishes the computational complexity of coordinate sufficiency problems:
 
--   **SUFFICIENCY-CHECK** is -complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"})
+-   **SUFFICIENCY-CHECK** is coNP-complete (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"})
 
--   **MINIMUM-SUFFICIENT-SET** is -complete (Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"})
+-   **MINIMUM-SUFFICIENT-SET** is coNP-complete (Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"})
 
--   **ANCHOR-SUFFICIENCY** is $\SigmaP{2}$-complete (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"})
+-   **ANCHOR-SUFFICIENCY** is $\Sigma_{2}^{P}$-complete (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"})
 
 -   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
@@ -1358,13 +1358,13 @@ These results place the problem of identifying decision-relevant coordinates at 
 
 Beyond classification, the paper contributes a formal claim-typing framework (Section [\[sec:interpretive-foundations\]](#sec:interpretive-foundations){reference-type="ref" reference="sec:interpretive-foundations"}): structural complexity is a property of the fixed decision relation, while representational hardness is regime-conditional access cost. This is why encoding-regime changes can move practical hardness without changing the underlying semantics.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\SigmaP{2}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is -complete, $\exists\forall$-SAT is $\SigmaP{2}$-complete). The strengthened gadget showing that non-tautologies yield instances with *all coordinates relevant* is also formalized.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"} for proof listings). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets; complexity classifications (coNP-completeness, $\Sigma_{2}^{P}$-completeness) follow by composition with standard complexity-theoretic results (TAUTOLOGY is coNP-complete, $\exists\forall$-SAT is $\Sigma_{2}^{P}$-complete). The strengthened gadget showing that non-tautologies yield instances with *all coordinates relevant* is also formalized.
 
 ## Complexity Characterization {#complexity-characterization .unnumbered}
 
 The results provide precise complexity characterizations within the formal model:
 
-1.  **Exact bounds.** SUFFICIENCY-CHECK is -complete---both -hard and in .
+1.  **Exact bounds.** SUFFICIENCY-CHECK is coNP-complete---both coNP-hard and in coNP.
 
 2.  **Constructive reductions.** The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
