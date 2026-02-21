@@ -4,8 +4,8 @@
 
 This directory contains the complete Lean 4 formalization for Decision Quotient.
 
-- **Lines:** 7071
-- **Theorems:** 310
+- **Lines:** 7132
+- **Theorems:** 315
 - **`sorry` placeholders:** 0
 
 
