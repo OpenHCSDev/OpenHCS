@@ -4,7 +4,7 @@
 
 This directory contains the complete Lean 4 formalization for Credibility.
 
-- **Lines:** 1560
+- **Lines:** 1511
 - **Theorems:** 72
 - **`sorry` placeholders:** 0
 

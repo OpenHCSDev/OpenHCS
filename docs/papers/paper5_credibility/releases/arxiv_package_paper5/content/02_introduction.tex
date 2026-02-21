@@ -88,7 +88,9 @@ epistemic bounds of communicating that information.
     Theorem 3.2: Magnitude Penalty (credibility decreases with claim
     magnitude)
   \item
-    Theorem 3.3: Meta-Assertion Trap (recursive bound on assertions
+    Theorem 3.3: Emphasis Penalty (excessive assertion decreases credibility)
+  \item
+    Theorem 3.4: Meta-Assertion Trap (recursive bound on assertions
     about assertions)
   \end{itemize}
 \item
@@ -122,6 +124,11 @@ epistemic bounds of communicating that information.
 Lean 4 \cite{demoura2021lean4,mathlib2020}.
 \end{enumerate}
 
+\textbf{Claim typing.} As in Paper 4, strong claims are typed by regime rather than asserted globally:
+cheap-talk channel claims (\texttt{[CT]}), verified-signal claims (\texttt{[VS]}),
+and domain-specific audience claims (\texttt{[M]} mathematical, \texttt{[S]} social).
+Applied recommendations are valid only in the tagged regime where the theorem is proved.
+
 \subsection{Anticipated Objections}\label{sec:objection-summary}
 
 Before proceeding, we address objections readers are likely forming. Each is refuted in detail in Appendix~\ref{appendix-rebuttals}.
@@ -145,4 +152,3 @@ The Lean proofs formalize the mathematical structure of signaling theory. They v
 \noindent\textbf{If you have an objection not listed above,} check Appendix~\ref{appendix-rebuttals} before concluding it has not been considered.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

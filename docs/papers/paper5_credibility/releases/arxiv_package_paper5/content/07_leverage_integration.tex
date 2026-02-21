@@ -10,9 +10,20 @@ word can be independently modified.
 
 \textbf{Signal Leverage:} \(L_S = \frac{\Delta C}{\text{Words}}\)
 
-\textbf{Theorem 6.1 (Credibility Leverage).} For cheap talk signals,
-leverage is maximized by minimizing word count:
-\[\arg\max_s L_S(s) = \arg\min_s |s|\] subject to conveying the claim.
+\begin{theorem}[Credibility Leverage]\label{thm:credibility-leverage}
+For cheap-talk signals with nonnegative credibility impact, leverage is maximized by minimizing word count:
+\[
+\arg\max_s L_S(s) = \arg\min_s |s|
+\]
+subject to conveying the claim.
+\textit{(Lean anchors: \texttt{credibility\_leverage\_minimization},
+\texttt{brevity\_principle}.)}
+\end{theorem}
+
+\begin{proof}
+With impact fixed and nonnegative, \(L_S=\Delta C/\text{Words}\) is inverse-monotone in word count.
+Hence shorter valid signals weakly dominate longer ones in leverage.
+\end{proof}
 
 \textbf{Interpretation:} Shorter, terser memory entries achieve higher
 credibility leverage than verbose explanations. ``70k lines, deployed in
@@ -74,4 +85,3 @@ Corporate social responsibility (CSR) reports can exhibit varying degrees of coh
 Independent sustainability audits serve as dual-cost signals that increase credibility.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-

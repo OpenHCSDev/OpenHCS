@@ -1,6 +1,6 @@
 # Paper: A Formal Theory of Credibility: Why Assertions of Trustworthiness Decrease Trust
 
-**Status**: Draft-ready | **Lean**: 1560 lines, 72 theorems
+**Status**: Draft-ready | **Lean**: 1511 lines, 72 theorems
 
 ---
 
@@ -16,7 +16,7 @@ A counterintuitive phenomenon pervades epistemic communication: emphatic asserti
 
 **Theorem (Costly Signal Escape).** Signals with truth-dependent costs---where $\text{Cost}(s \mid \text{false}) > \text{Cost}(s \mid \text{true})$---can achieve arbitrarily high credibility as the cost differential increases. Machine-checked proofs are maximally costly signals: producing a compiling proof of a false theorem has infinite cost.
 
-These results integrate with the leverage framework (Paper 3): credibility leverage $L_C = \Delta C / \text{Signal Cost}$ is maximized by minimizing cheap talk and maximizing costly signal exposure. The theorems are formalized in Lean 4.
+These results integrate with the leverage framework (Paper 3): credibility leverage $L_C = \Delta C / \text{Signal Cost}$ is maximized by minimizing cheap talk and maximizing costly signal exposure. Claims are regime-typed by channel (`[CT]` cheap-talk, `[VS]` verifier-backed) and audience domain (`[M]`, `[S]`). The theorems are formalized in Lean 4.
 
 **Keywords:** signaling theory, cheap talk, credibility, Bayesian epistemology, costly signals, formal verification, Lean 4
 
@@ -71,7 +71,9 @@ This paper extends the leverage framework (Paper 3) [@paper3_leverage] to episte
 
     -   Theorem 3.2: Magnitude Penalty (credibility decreases with claim magnitude)
 
-    -   Theorem 3.3: Meta-Assertion Trap (recursive bound on assertions about assertions)
+    -   Theorem 3.3: Emphasis Penalty (excessive assertion decreases credibility)
+
+    -   Theorem 3.4: Meta-Assertion Trap (recursive bound on assertions about assertions)
 
 3.  **Costly Signal Characterization (Section 4):**
 
@@ -90,6 +92,8 @@ This paper extends the leverage framework (Paper 3) [@paper3_leverage] to episte
 5.  **Leverage Integration (Section 6):** Credibility as DOF minimization; optimal signaling strategies.
 
 6.  **Machine-Checked Proofs (Appendix):** All theorems formalized in Lean 4 [@demoura2021lean4; @mathlib2020].
+
+**Claim typing.** As in Paper 4, strong claims are typed by regime rather than asserted globally: cheap-talk channel claims (`[CT]`), verified-signal claims (`[VS]`), and domain-specific audience claims (`[M]` mathematical, `[S]` social). Applied recommendations are valid only in the tagged regime where the theorem is proved.
 
 ## Anticipated Objections {#sec:objection-summary}
 
@@ -184,6 +188,38 @@ This paper introduces a dual truth framework that distinguishes between objectiv
 **Definition 2.7 (Deception Prior).** Let $\pi_d \in [0,1]$ be the prior probability that a random agent will produce deceptive signals. This is common knowledge.
 
 **Definition 2.8 (Magnitude).** The *magnitude* of a claim $c$ is: $$M(c) = -\log P(c)$$ High-magnitude claims have low prior probability. This is the standard self-information measure [@shannon1948].
+
+## Model Contract and Regime Tags {#sec:credibility-contract}
+
+All theorem statements in this paper are typed by the following contract:
+
+-   **K1 (binary claim state):** claim truth is modeled as $C \in \{0,1\}$.
+
+-   **K2 (Bayesian receiver):** posterior credibility is computed by Bayes updates.
+
+-   **K3 (signal channel declaration):** each theorem declares whether the signal channel is cheap talk or verifier-backed.
+
+-   **K4 (audience domain declaration):** each theorem declares mathematical-domain ($C_M$) or social-domain ($C_S$) scope.
+
+We use the following regime tags:
+
+-   `[CT]`: cheap-talk channel (truth-independent signal cost),
+
+-   `[VS]`: verifier-backed signal channel ($\varepsilon_T,\varepsilon_F$ model),
+
+-   `[M]`: mathematical credibility domain,
+
+-   `[S]`: social credibility domain,
+
+-   `[D]`: dual-truth vector extensions ($E,G$).
+
+::: proposition
+[]{#prop:credibility-regime-coverage label="prop:credibility-regime-coverage"} Each declared regime above has at least one theorem-level mechanized core in Lean: `[CT]` via `cheap_talk_bound`, `magnitude_penalty`, `emphasis_penalty`; `[VS]` via `verified_signal_credibility`, `proof_as_ultimate_signal`; `[M]/[S]` via `domain_independence_math_not_implies_social` and `domain_independence_social_not_implies_math`.
+:::
+
+::: proof
+*Proof.* Direct by inspection of the theorem declarations in `Credibility/CheapTalk.lean`, `Credibility/CostlySignals.lean`, and `Credibility/Basic.lean`. ◻
+:::
 
 ::: center
 
@@ -296,7 +332,7 @@ The signal provides negligible information; $\epsilon \to 0$. ◻
 
 For a claim to be deceptive in a coherent way, it would need to be both epistemically false and ego-aligned, but the high $\Delta_E$ makes this costly. For a claim to be ego-driven but epistemically true, the high $\Delta_G$ makes this costly. Thus, only coherent claims (both epistemically true and ego-aligned) can afford to produce the signal.
 
-As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the credibility vector theorem (Theorem [\[thm:credibility-vector\]](#thm:credibility-vector){reference-type="ref" reference="thm:credibility-vector"}): $$\Pr[\vec{T} \text{ coherent} \mid S] = \frac{p}{p + (1-p)\beta} \to 1 \text{ as } \beta \to 0.$$ ◻
+As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the same Bayes update form as Theorem [\[thm:cheap-talk-bound\]](#thm:cheap-talk-bound){reference-type="ref" reference="thm:cheap-talk-bound"} to the coherence event: $$\Pr[\vec{T} \text{ coherent} \mid S] = \frac{p}{p + (1-p)\beta} \to 1 \text{ as } \beta \to 0.$$ ◻
 :::
 
 ::: theorem
@@ -361,7 +397,21 @@ As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $
 
 ## Optimal Strategies
 
-**Theorem 5.3 (Optimal Credibility Strategy).** For high-magnitude claims, the credibility-maximizing strategy is: 1. Minimize cheap talk (reduce emphasis, meta-assertions) 2. Maximize costly signal exposure (show the work, provide proofs) 3. Enable real-time demonstration (costly to fake)
+::: theorem
+[]{#thm:optimal-credibility-strategy label="thm:optimal-credibility-strategy"} For high-magnitude claims in regime `[CT]`+`[VS]`, an optimal strategy is:
+
+1.  Minimize cheap talk (reduce emphasis and meta-assertions),
+
+2.  Maximize costly-signal exposure (show work and verifiable artifacts),
+
+3.  Enable costly-to-fake demonstration channels.
+
+*(Lean anchor: `optimal_strategy_dominance`.)*
+:::
+
+::: proof
+*Proof.* From Theorem [\[thm:text-bound\]](#thm:text-bound){reference-type="ref" reference="thm:text-bound"}, text-only updates are bounded for high-magnitude claims. From Theorem [\[thm:verified-signal\]](#thm:verified-signal){reference-type="ref" reference="thm:verified-signal"}, verifier-backed channels strictly improve achievable posterior credibility as false-positive rate decreases. Therefore optimal policy minimizes bounded channels and allocates effort to verifier-backed costly channels. ◻
+:::
 
 ::: center
 
@@ -379,7 +429,13 @@ Applying the leverage framework (Paper 3) [@paper3_leverage]:
 
 **Signal Leverage:** $L_S = \frac{\Delta C}{\text{Words}}$
 
-**Theorem 6.1 (Credibility Leverage).** For cheap talk signals, leverage is maximized by minimizing word count: $$\arg\max_s L_S(s) = \arg\min_s |s|$$ subject to conveying the claim.
+::: theorem
+[]{#thm:credibility-leverage label="thm:credibility-leverage"} For cheap-talk signals with nonnegative credibility impact, leverage is maximized by minimizing word count: $$\arg\max_s L_S(s) = \arg\min_s |s|$$ subject to conveying the claim. *(Lean anchors: `credibility_leverage_minimization`, `brevity_principle`.)*
+:::
+
+::: proof
+*Proof.* With impact fixed and nonnegative, $L_S=\Delta C/\text{Words}$ is inverse-monotone in word count. Hence shorter valid signals weakly dominate longer ones in leverage. ◻
+:::
 
 **Interpretation:** Shorter, terser memory entries achieve higher credibility leverage than verbose explanations. "70k lines, deployed in 3 labs" beats lengthy justification.
 
@@ -463,7 +519,7 @@ We have formalized why assertions of credibility can decrease perceived credibil
 
 **Role of LLMs in this work.** This paper was developed through human-AI collaboration, and this disclosure is particularly apropos given the paper's subject matter. The author provided the core intuitions---the cheap talk bound, the emphasis paradox, the impossibility of achieving full credibility via text---while large language models (Claude, GPT-4) served as implementation partners for formalization, proof drafting, and LaTeX generation.
 
-The Lean 4 proofs (633 lines, 0 sorry placeholders) were iteratively developed: the author specified theorems, the LLM proposed proof strategies, and the Lean compiler verified correctness.
+The Lean 4 proofs (1511 lines, 0 sorry placeholders) were iteratively developed: the author specified theorems, the LLM proposed proof strategies, and the Lean compiler verified correctness.
 
 **What the author contributed:** The credibility framework itself, the cheap talk bound conjecture, the emphasis penalty insight, the connection to costly signaling theory, and the meta-observation that Lean proofs are maximally costly signals.
 
@@ -479,141 +535,62 @@ The Lean 4 proofs (633 lines, 0 sorry placeholders) were iteratively developed: 
 
 # Appendix: Lean Formalization
 
-## On the Nature of Foundational Proofs {#foundational-proofs-nature}
+## Verification Scope
 
-Before presenting the proof listings, we address a potential misreading: a reader examining the Lean source code will notice that many proofs are straightforward applications of definitions or Bayesian updating rules. This simplicity is not a sign of triviality. It is characteristic of *foundational* work in game theory and signaling, where the insight lies in the formalization, not the derivation.
+All theorem-level claims in this paper are mapped to Lean declarations in `docs/papers/paper5_credibility/proofs/Credibility/*.lean`. The proof artifact is checked by running:
 
-**Definitional vs. derivational proofs.** Our core theorems establish *definitional* properties and Bayesian consequences, not complex derivations. For example, the cheap talk bound (Theorem 3.1) proves that text-only signals cannot exceed a credibility ceiling determined by priors and detection probability. The proof follows from Bayes' rule---it's an unfolding of what "cheap talk" means (cost independent of truth value). This is not a complex derivation; it is applying the definition of cheap talk to Bayesian updating.
-
-**Precedent in game theory.** This pattern appears throughout foundational game theory and signaling:
-
--   **Crawford & Sobel (1982):** Cheap talk equilibrium characterization. The proof applies sequential rationality to show equilibria must be interval partitions. The construction is straightforward once the right framework is identified.
-
--   **Spence's Signaling Model (1973):** Separating equilibrium in labor markets. The proof shows costly education signals quality because low-ability workers find it too expensive. The mathematics is basic calculus comparing utility differences.
-
--   **Akerlof's Lemons (1970):** Market for lemons unraveling. The proof is pure adverse selection logic---once quality is unobservable, bad products drive out good. The profundity is in recognizing the mechanism, not deriving it.
-
-**Why simplicity indicates strength.** A definitional theorem derived from precise formalization is *stronger* than an informal argument. When we prove that text credibility is bounded (Theorem 5.1), we are not saying "we haven't found a persuasive argument yet." We are saying something universal: *any* text-based argument, no matter how cleverly phrased, cannot exceed the cheap talk bound for high-magnitude claims. The proof follows from the definition of cheap talk plus Bayesian rationality.
-
-**Where the insight lies.** The semantic contribution of our formalization is:
-
-1.  **Precision forcing.** Formalizing "credibility" in Lean requires stating exactly what it means for a signal to be believed. We define credibility as posterior probability after Bayesian updating, which forces precision about priors, likelihoods, and detection probabilities.
-
-2.  **Impossibility results.** Theorem 5.2 (memory iteration futility) proves that iteratively refining text in memory cannot escape the cheap talk bound. This is machine-checked to hold for *any* number of iterations---the bound is definitional, not algorithmic.
-
-3.  **Leverage connection.** Theorem 6.1 connects credibility to the leverage framework (Paper 3), showing that credibility-per-word is the relevant metric. This emerges from the formalization of signal cost structure, not from intuition.
-
-**What machine-checking guarantees.** The Lean compiler verifies that every proof step is valid, every definition is consistent, and no axioms are added beyond Lean's foundations (extended with Mathlib for real analysis and probability). Zero `sorry` placeholders means zero unproven claims. The 430+ lines establish a verified chain from basic definitions (signals, cheap talk, costly signals) to the final theorems (impossibility results, leverage minimization). Reviewers need not trust our informal explanations---they can run `lake build` and verify the proofs themselves.
-
-**Comparison to informal signaling arguments.** Prior work on AI credibility and generated text (Bommasani et al. [@bommasani2021opportunities], Bender et al. [@bender2021dangers]) presents compelling informal arguments about trustworthiness but lacks formal signaling models. Our contribution is not new *wisdom*---the insight that cheap talk is non-credible is old (Crawford & Sobel [@crawford1982strategic]). Our contribution is *formalization*: applying signaling theory to AI-mediated communication, formalizing the cheap talk vs. costly signal distinction for LLM outputs, and proving the impossibility results hold for machine-checked proofs as ultimate costly signals.
-
-This follows the tradition of formalizing economic principles: just as Myerson [@myerson1979incentive] formalized incentive compatibility and Mas-Colell et al. [@mascolell1995microeconomic] formalized general equilibrium, we formalize credibility in AI-mediated signaling. The proofs are simple because the formalization makes the structure clear. Simple proofs from precise definitions are the goal, not a limitation.
+    cd docs/papers/paper5_credibility/proofs
+    lake build
 
 ## Module Structure
 
-The following proofs were developed in Lean 4 [@demoura2021lean4; @mathlib2020]. The source code is organized as follows:
-
     Credibility/
-    |- Basic.lean         -- Definitions 2.1-2.8
-    |- CheapTalk.lean     -- Theorems 3.1-3.4
-    |- CostlySignals.lean -- Theorems 4.1-4.2
-    |- Impossibility.lean -- Theorems 5.1-5.3
-    `- Leverage.lean      -- Theorem 6.1
+    |- Basic.lean            -- core definitions + domain-independence lemmas
+    |- CheapTalk.lean        -- Theorems 3.1-3.4
+    |- CostlySignals.lean    -- Theorems 4.1-4.4
+    |- Impossibility.lean    -- Theorems 5.1-5.3 (+ asymptotic form)
+    |- Leverage.lean         -- leverage theorems
+    `- CoherentStopping.lean -- stopping/threshold bridge utilities
 
-## Core Definitions (Lean 4)
+## Claim-to-Proof Mapping
 
-    -- Basic.lean
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  **Paper Claim**                                                                                                                                            **Lean Handle(s)**                                                                                                                 **Tag**
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------- ---------------
+  Theorem [\[thm:cheap-talk-bound\]](#thm:cheap-talk-bound){reference-type="ref" reference="thm:cheap-talk-bound"}                                           `cheap_talk_bound`, `cheap_talk_bound_tight`                                                                                       `[CT]`
 
-    /-- A signal with content, truth value, and production cost -/
-    structure Signal where
-      content : String
-      truthValue : Bool
-      cost : ℝ
-      cost_nonneg : cost >= 0
+  Theorem [\[thm:magnitude-penalty\]](#thm:magnitude-penalty){reference-type="ref" reference="thm:magnitude-penalty"}                                        `magnitude_penalty`                                                                                                                `[CT]`
 
-    /-- Cheap talk: cost independent of truth value -/
-    def isCheapTalk (costIfTrue costIfFalse : ℝ) : Prop :=
-      costIfTrue = costIfFalse
+  Theorem [\[thm:emphasis-penalty\]](#thm:emphasis-penalty){reference-type="ref" reference="thm:emphasis-penalty"}                                           `emphasis_penalty`                                                                                                                 `[CT]`
 
-    /-- Costly signal: higher cost if false -/
-    def isCostlySignal (costIfTrue costIfFalse : ℝ) : Prop :=
-      costIfFalse > costIfTrue
+  Theorem [\[thm:meta-assertion-trap\]](#thm:meta-assertion-trap){reference-type="ref" reference="thm:meta-assertion-trap"}                                  `meta_assertion_trap`, `meta_assertion_bounded`                                                                                    `[CT]`
 
-    /-- Magnitude of a claim (negative log prior) -/
-    def magnitude (prior : ℝ) (h : 0 < prior) (h' : prior <= 1) : ℝ :=
-      -Real.log prior
+  Theorem [\[thm:costly-signal\]](#thm:costly-signal){reference-type="ref" reference="thm:costly-signal"}                                                    `costly_dominates_cheap`                                                                                                           `[VS]`
 
-    /-- Credibility function type -/
-    def CredibilityFn := Claim -> List Signal -> ℝ
+  Theorem [\[thm:verified-signal\]](#thm:verified-signal){reference-type="ref" reference="thm:verified-signal"}                                              `verified_signal_credibility`, `verified_signal_limit_one`                                                                         `[VS]`
 
-## Cheap Talk Bound (Lean 4)
+  Theorem [\[thm:proof-ultimate\]](#thm:proof-ultimate){reference-type="ref" reference="thm:proof-ultimate"}                                                 `proof_as_ultimate_signal`                                                                                                         `[VS],[M]`
 
-    -- CheapTalk.lean
+  Theorem [\[thm:text-bound\]](#thm:text-bound){reference-type="ref" reference="thm:text-bound"}                                                             `text_credibility_bound`, `asymptotic_impossibility`                                                                               `[CT]`
 
-    /-- The cheap talk credibility bound -/
-    theorem cheap_talk_bound 
-        (prior : ℝ) (deceptionPrior : ℝ)
-        (h_prior : 0 < prior and prior <= 1)
-        (h_dec : 0 <= deceptionPrior and deceptionPrior <= 1) :
-        cheapTalkCredibility prior deceptionPrior <= 
-          prior / (prior + (1 - prior) * (1 - deceptionPrior)) := by
-      unfold cheapTalkCredibility
-      -- Bayesian calculation
-      ...
+  Theorem [\[thm:optimal-credibility-strategy\]](#thm:optimal-credibility-strategy){reference-type="ref" reference="thm:optimal-credibility-strategy"}       `optimal_strategy_dominance`                                                                                                       `[CT]+[VS]`
 
-    /-- Magnitude penalty: higher magnitude -> lower credibility -/
-    theorem magnitude_penalty
-        (c1 c2 : Claim) (s : Signal)
-        (h : c1.prior > c2.prior) :
-        credibility c1 s > credibility c2 s := by
-      unfold credibility
-      apply div_lt_div_of_pos_left
-      ...
+  Theorem [\[thm:credibility-leverage\]](#thm:credibility-leverage){reference-type="ref" reference="thm:credibility-leverage"}                               `credibility_leverage_minimization`, `brevity_principle`                                                                           `[CT]`
 
-    /-- Emphasis penalty: excessive signals decrease credibility -/
-    theorem emphasis_penalty
-        (c : Claim) (signals : List Signal) 
-        (h_long : signals.length > emphasisThreshold) :
-        exists k, forall n > k, 
-          credibility c (signals.take (n+1)) < credibility c (signals.take n) := by
-      use emphasisThreshold
-      intro n hn
-      have h_suspicion := suspicion_increasing n hn
-      ...
+  Proposition [\[prop:credibility-regime-coverage\]](#prop:credibility-regime-coverage){reference-type="ref" reference="prop:credibility-regime-coverage"}   `domain_independence_math_not_implies_social`, `domain_independence_social_not_implies_math`, `machine_proof_domain_specificity`   `[M],[S]`
+  -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## Impossibility Result (Lean 4)
+## Current Proof Statistics
 
-    -- Impossibility.lean
-
-    /-- No text achieves full credibility for high-magnitude claims -/
-    theorem text_credibility_bound
-        (T : String) (c : Claim)
-        (h_magnitude : c.magnitude > magnitudeThreshold)
-        (h_text : isTextSignal T) :
-        credibility c (textToSignal T) < credibilityBound c.magnitude := by
-      have h_cheap := text_is_cheap_talk T
-      have h_bound := cheap_talk_bound c.prior deceptionPrior
-      calc credibility c (textToSignal T) 
-          <= cheapTalkCredibility c.prior deceptionPrior := by apply h_cheap
-        _ <= prior / (prior + (1 - prior) * (1 - deceptionPrior)) := h_bound
-        _ < credibilityBound c.magnitude := by
-            apply bound_decreasing_in_magnitude
-            exact h_magnitude
-
-    /-- Corollary: Memory iteration is bounded -/
-    corollary memory_iteration_futility
-        (memories : List String) (c : Claim)
-        (h_magnitude : c.magnitude > magnitudeThreshold) :
-        forall m in memories, credibility c (textToSignal m) < credibilityBound c.magnitude := by
-      intro m _
-      exact text_credibility_bound m c h_magnitude (string_is_text m)
+**Lean files:** 8\
+**Lean lines:** 1511\
+**Theorem/lemma statements:** 72\
+**Sorry placeholders:** 0
 
 ::: center
 
 ----------------------------------------------------------------------------------------------------
 :::
-
-**Lines:** 430 **Theorems:** \~12 **Sorry placeholders:** 0
 
 
 # Preemptive Rebuttals {#appendix-rebuttals}
@@ -727,6 +704,6 @@ Both measure efficiency: capability per unit of constraint. The integration show
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper5_credibility/proofs/`
-- Lines: 1560
+- Lines: 1511
 - Theorems: 72
 - `sorry` placeholders: 0

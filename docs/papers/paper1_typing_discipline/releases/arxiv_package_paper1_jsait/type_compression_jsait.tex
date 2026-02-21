@@ -1,4 +1,10 @@
-\documentclass[journal]{IEEEtran}
+% Format switching: default is two-column journal (arXiv/camera-ready).
+% Pass \JSAITREVIEW via pdflatex CLI to get single-column double-spaced review format.
+\ifdefined\JSAITREVIEW
+  \documentclass[12pt, onecolumn, draftclsnofoot]{IEEEtran}
+\else
+  \documentclass[journal]{IEEEtran}
+\fi
 
 % IEEE JSAIT Format - IEEEtran class
 \usepackage[utf8]{inputenc}
@@ -13,6 +19,12 @@
 \usepackage{listings}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+
+% JSAIT review format: single column, double spaced, 1in margins
+\ifdefined\JSAITREVIEW
+  \usepackage{setspace}
+  \usepackage[margin=1in, letterpaper]{geometry}
+\fi
 
 % Allow URLs to break at any character
 \makeatletter
@@ -44,6 +56,7 @@
 \thanks{Manuscript received \today.}}
 
 \begin{document}
+\ifdefined\JSAITREVIEW\doublespacing\fi
 
 \maketitle
 

@@ -98,5 +98,37 @@ signals. This is common knowledge.
 \(c\) is: \[M(c) = -\log P(c)\] High-magnitude claims have low prior
 probability. This is the standard self-information measure \cite{shannon1948}.
 
-\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+\subsection{Model Contract and Regime Tags}\label{sec:credibility-contract}
 
+All theorem statements in this paper are typed by the following contract:
+\begin{itemize}
+\item \textbf{K1 (binary claim state):} claim truth is modeled as \(C \in \{0,1\}\).
+\item \textbf{K2 (Bayesian receiver):} posterior credibility is computed by Bayes updates.
+\item \textbf{K3 (signal channel declaration):} each theorem declares whether the signal channel is cheap talk or verifier-backed.
+\item \textbf{K4 (audience domain declaration):} each theorem declares mathematical-domain (\(C_M\)) or social-domain (\(C_S\)) scope.
+\end{itemize}
+
+We use the following regime tags:
+\begin{itemize}
+\item \texttt{[CT]}: cheap-talk channel (truth-independent signal cost),
+\item \texttt{[VS]}: verifier-backed signal channel (\(\varepsilon_T,\varepsilon_F\) model),
+\item \texttt{[M]}: mathematical credibility domain,
+\item \texttt{[S]}: social credibility domain,
+\item \texttt{[D]}: dual-truth vector extensions (\(E,G\)).
+\end{itemize}
+
+\begin{proposition}[Declared Regime Coverage for Credibility Claims]\label{prop:credibility-regime-coverage}
+Each declared regime above has at least one theorem-level mechanized core in Lean:
+\texttt{[CT]} via \texttt{cheap\_talk\_bound}, \texttt{magnitude\_penalty}, \texttt{emphasis\_penalty};
+\texttt{[VS]} via \texttt{verified\_signal\_credibility}, \texttt{proof\_as\_ultimate\_signal};
+\texttt{[M]/[S]} via \texttt{domain\_independence\_math\_not\_implies\_social} and
+\texttt{domain\_independence\_social\_not\_implies\_math}.
+\end{proposition}
+
+\begin{proof}
+Direct by inspection of the theorem declarations in
+\texttt{Credibility/CheapTalk.lean}, \texttt{Credibility/CostlySignals.lean}, and
+\texttt{Credibility/Basic.lean}.
+\end{proof}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

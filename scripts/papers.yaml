@@ -36,6 +36,10 @@ papers:
     latex_dir: "latex_jsait"
     latex_file: "type_compression_jsait.tex"
     venue: "JSAIT"
+    # Review submission format: pdflatex flag triggers single-column double-spaced
+    submission_format:
+      latex_flag: "\\JSAITREVIEW"
+      description: "JSAIT review: single column, double spaced, 12pt, 1in margins"
 
   paper2:
     name: "SSOT Foundations"

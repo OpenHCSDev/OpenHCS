@@ -36,7 +36,7 @@ A dual-cost signal with both $\Delta_E > 0$ and $\Delta_G > 0$ is costly for two
 
 For a claim to be deceptive in a coherent way, it would need to be both epistemically false and ego-aligned, but the high $\Delta_E$ makes this costly. For a claim to be ego-driven but epistemically true, the high $\Delta_G$ makes this costly. Thus, only coherent claims (both epistemically true and ego-aligned) can afford to produce the signal.
 
-As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the credibility vector theorem (Theorem~\ref{thm:credibility-vector}):
+As $\min(\Delta_E, \Delta_G) \to \infty$, the probability of deceptive signals $\beta := \Pr[S \mid \vec{T} \text{ incoherent}] \to 0$. Applying the same Bayes update form as Theorem~\ref{thm:cheap-talk-bound} to the coherence event:
 \[
 \Pr[\vec{T} \text{ coherent} \mid S] = \frac{p}{p + (1-p)\beta} \to 1 \text{ as } \beta \to 0.
 \]
@@ -141,4 +141,3 @@ $\varepsilon_F \approx 0$ (proof assistant soundness). See \cite{demoura2021lean
 \end{proof}
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
-
