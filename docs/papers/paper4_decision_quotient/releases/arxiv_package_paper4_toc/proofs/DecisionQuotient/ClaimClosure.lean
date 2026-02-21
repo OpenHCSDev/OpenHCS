@@ -515,5 +515,134 @@ theorem tractable_subcases_conditional
 
 end ComplexityLifts
 
+/-! ## Subproblem-to-full transfer closure (`#2`) -/
+
+section SubproblemTransfer
+
+/-- Generic transfer principle:
+hardness of a subproblem lifts to the full problem whenever every full solver
+induces a solver for the subproblem. -/
+theorem subproblem_hardness_lifts_to_full
+    {HasFullSolver HasSubSolver : Prop}
+    (hRestrict : HasFullSolver → HasSubSolver)
+    (hSubHard : ¬ HasSubSolver) :
+    ¬ HasFullSolver := by
+  intro hFull
+  exact hSubHard (hRestrict hFull)
+
+end SubproblemTransfer
+
+/-! ## Selector / epsilon transfer-separation (`#6`) -/
+
+section SelectorAndEpsilon
+
+variable {A S : Type*} {n : ℕ} [CoordinateSpace S n]
+
+/-- ε-optimal action set. -/
+def DecisionProblem.epsOpt (dp : DecisionProblem A S) (ε : ℝ) (s : S) : Set A :=
+  { a : A | ∀ a' : A, dp.utility a' s ≤ dp.utility a s + ε }
+
+/-- ε-sufficiency: projection agreement preserves ε-optimal sets. -/
+def DecisionProblem.isEpsilonSufficient (dp : DecisionProblem A S)
+    (ε : ℝ) (I : Finset (Fin n)) : Prop :=
+  ∀ s s' : S, agreeOn s s' I →
+    DecisionProblem.epsOpt dp ε s = DecisionProblem.epsOpt dp ε s'
+
+theorem DecisionProblem.epsOpt_zero_eq_opt (dp : DecisionProblem A S) (s : S) :
+    DecisionProblem.epsOpt dp 0 s = dp.Opt s := by
+  ext a
+  simp [DecisionProblem.epsOpt, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem DecisionProblem.sufficient_iff_zeroEpsilonSufficient
+    (dp : DecisionProblem A S) (I : Finset (Fin n)) :
+    dp.isSufficient I ↔ DecisionProblem.isEpsilonSufficient dp 0 I := by
+  constructor
+  · intro hI
+    intro s s' hs
+    simpa [DecisionProblem.epsOpt_zero_eq_opt (dp := dp) s,
+      DecisionProblem.epsOpt_zero_eq_opt (dp := dp) s'] using hI s s' hs
+  · intro hI
+    intro s s' hs
+    simpa [DecisionProblem.epsOpt_zero_eq_opt (dp := dp) s,
+      DecisionProblem.epsOpt_zero_eq_opt (dp := dp) s'] using hI s s' hs
+
+/-! ### Explicit selector-level separation witness -/
+
+private def i0 : Fin 1 := ⟨0, by decide⟩
+private def sFalse : Fin 1 → Bool := fun _ => false
+private def sTrue : Fin 1 → Bool := fun _ => true
+
+/-- Witness problem where selector-level sufficiency can hold while set-level
+sufficiency fails (for `I = ∅`). -/
+def selectorGapProblem : DecisionProblem Bool (Fin 1 → Bool) where
+  utility := fun a s =>
+    if s i0 then
+      if a = true then 1 else 1
+    else
+      if a = true then 1 else 0
+
+noncomputable def preferTrueSelector (X : Set Bool) : Bool := by
+  classical
+  exact if (true : Bool) ∈ X then true else false
+
+theorem selectorGap_true_mem_opt (s : Fin 1 → Bool) :
+    (true : Bool) ∈ (selectorGapProblem.Opt s) := by
+  unfold selectorGapProblem DecisionProblem.Opt DecisionProblem.isOptimal
+  intro a'
+  cases a' <;> by_cases hs : s i0 <;> simp [hs]
+
+theorem selectorGap_selectorSufficient_empty :
+    selectorGapProblem.isSelectorSufficient preferTrueSelector (∅ : Finset (Fin 1)) := by
+  intro s s' _
+  unfold DecisionProblem.SelectedAction preferTrueSelector
+  have hs : (true : Bool) ∈ selectorGapProblem.Opt s := selectorGap_true_mem_opt s
+  have hs' : (true : Bool) ∈ selectorGapProblem.Opt s' := selectorGap_true_mem_opt s'
+  simp [hs, hs']
+
+theorem selectorGap_not_set_sufficient_empty :
+    ¬ selectorGapProblem.isSufficient (∅ : Finset (Fin 1)) := by
+  intro hsuff
+  have hconst :=
+    (DecisionProblem.emptySet_sufficient_iff_constant (dp := selectorGapProblem)).1 hsuff
+  have hEq : selectorGapProblem.Opt sFalse = selectorGapProblem.Opt sTrue := hconst sFalse sTrue
+  have hFalseInTrue : (false : Bool) ∈ selectorGapProblem.Opt sTrue := by
+    unfold selectorGapProblem DecisionProblem.Opt DecisionProblem.isOptimal sTrue i0
+    intro a'
+    cases a' <;> simp
+  have hFalseNotInFalse : (false : Bool) ∉ selectorGapProblem.Opt sFalse := by
+    intro hmem
+    have h := hmem true
+    unfold selectorGapProblem sFalse i0 at h
+    norm_num at h
+  have hFalseInFalse : (false : Bool) ∈ selectorGapProblem.Opt sFalse := by
+    simpa [hEq] using hFalseInTrue
+  exact hFalseNotInFalse hFalseInFalse
+
+theorem selectorSufficient_not_implies_setSufficient :
+    ∃ (dp : DecisionProblem Bool (Fin 1 → Bool))
+      (σ : Set Bool → Bool) (I : Finset (Fin 1)),
+      dp.isSelectorSufficient σ I ∧ ¬ dp.isSufficient I := by
+  refine ⟨selectorGapProblem, preferTrueSelector, ∅, ?_⟩
+  exact ⟨selectorGap_selectorSufficient_empty, selectorGap_not_set_sufficient_empty⟩
+
+end SelectorAndEpsilon
+
+/-! ## Assumption ledger projection (`#8`) -/
+
+section AssumptionLedger
+
+theorem standard_assumption_ledger_unpack
+    {TAUTOLOGY_coNP_complete SUFFICIENCY_in_coNP RelevantCard_coNP
+      RelevantCard_coNP_complete ExistsForallSAT_sigma2p_complete ETH : Prop}
+    (hStd : StandardComplexityAssumptions TAUTOLOGY_coNP_complete SUFFICIENCY_in_coNP
+      RelevantCard_coNP RelevantCard_coNP_complete
+      ExistsForallSAT_sigma2p_complete ETH) :
+    TAUTOLOGY_coNP_complete ∧ SUFFICIENCY_in_coNP ∧ RelevantCard_coNP ∧
+      RelevantCard_coNP_complete ∧ ExistsForallSAT_sigma2p_complete ∧ ETH := by
+  refine ⟨hStd.hTautologyCoNPComplete, hStd.hSufficiencyInCoNP, hStd.hRelevantCardCoNP,
+    hStd.hRelevantCardCoNPComplete, hStd.hExistsForallSATSigma2PComplete, hStd.hETH⟩
+
+end AssumptionLedger
+
 end ClaimClosure
 end DecisionQuotient

@@ -1,6 +1,6 @@
 # Paper: Computational Complexity of Sufficiency in Decision Problems
 
-**Status**: Theory of Computing-ready | **Lean**: 7345 lines, 327 theorems
+**Status**: Theory of Computing-ready | **Lean**: 7741 lines, 350 theorems
 
 ---
 
@@ -16,13 +16,13 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
--   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for both 'Opt'-oracle and value-entry interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem.
+-   **Intermediate query-access lower bounds:** In mechanized Boolean query submodels, SUFFICIENCY-CHECK has worst-case query complexity $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs for the $I=\emptyset$ subproblem; the obstruction is seedwise robust under finite-support randomization.
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7345 lines, 327 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 (7741 lines, 350 theorem/lemma statements); complexity classifications follow by composition with standard results (see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}).
 
 **Keywords:** computational complexity, decision theory, polynomial hierarchy, tractability dichotomy, Lean 4
 
@@ -75,7 +75,7 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 
 -   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
--   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for both the 'Opt'-oracle interface and the value-entry interface $(a,s)\mapsto U(a,s)$ (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}, [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"}).
+-   In the intermediate query-access model: the mechanized Boolean submodels yield full worst-case lower bounds $\Omega(2^n)$ for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"} and [\[prop:query-subproblem-transfer\]](#prop:query-subproblem-transfer){reference-type="ref" reference="prop:query-subproblem-transfer"}, [\[prop:query-randomized-robustness\]](#prop:query-randomized-robustness){reference-type="ref" reference="prop:query-randomized-robustness"}).
 
 -   In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
@@ -95,7 +95,7 @@ The explicit ETH lower bound is still a succinct worst-case statement; Propositi
 
 ## Machine-Checked Proofs
 
-The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7345 lines, 327 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
+The reduction constructions and key equivalence theorems are machine-checked in Lean 4 [@moura2021lean4] (7741 lines, 350 theorem/lemma statements). The formalization verifies that the TAUTOLOGY reduction correctly maps tautologies to sufficient coordinate sets. Complexity class membership (coNP-completeness, $\Sigma_2^P$-completeness) follows by composition with standard complexity-theoretic results.
 
 #### What is new.
 
@@ -154,6 +154,20 @@ We formalize decision problems with coordinate structure, sufficiency of coordin
 
 ::: proof
 *Proof.* If $I$ is sufficient, then $s_I=s'_I$ implies $\Opt(s)=\Opt(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions. ◻
+:::
+
+::: definition
+[]{#def:epsilon-sufficiency label="def:epsilon-sufficiency"} For $\varepsilon \ge 0$, define $$\Opt_\varepsilon(s)
+:=
+\{a\in A:\forall a'\in A,\ U(a',s)\le U(a,s)+\varepsilon\}.$$ Coordinate set $I$ is *$\varepsilon$-sufficient* if $$\forall s,s'\in S:\ s_I=s'_I \implies \Opt_\varepsilon(s)=\Opt_\varepsilon(s').$$
+:::
+
+::: proposition
+[]{#prop:zero-epsilon-reduction label="prop:zero-epsilon-reduction"} Set-valued sufficiency is exactly the $\varepsilon=0$ case: $$I\text{ sufficient } \iff I\text{ is }0\text{-sufficient}.$$ *(Lean: `DecisionProblem.epsOpt_zero_eq_opt`, `DecisionProblem.sufficient_iff_zeroEpsilonSufficient`)*
+:::
+
+::: proposition
+[]{#prop:selector-separation label="prop:selector-separation"} The converse of Proposition [\[prop:set-to-selector\]](#prop:set-to-selector){reference-type="ref" reference="prop:set-to-selector"} fails in general: there exists a decision problem, selector, and coordinate set $I$ such that $I$ is selector-sufficient but not sufficient in the full set-valued sense. *(Lean witness: `ClaimClosure.selectorSufficient_not_implies_setSufficient`.)*
 :::
 
 ::: definition
@@ -684,6 +698,30 @@ Consequently, no deterministic query procedure using fewer than $2^n$ state quer
 
 ::: proof
 *Proof.* The theorem `emptySufficiency_valueEntry_indistinguishable_pair` constructs, for any query set of cardinality $<2^n$, an unqueried hidden state $s_0$ and a yes/no instance pair that agree on all queried values but disagree on $\emptyset$-sufficiency. The auxiliary bound `touchedStates_card_le_query_card` ensures that fewer than $2^n$ value-entry queries cannot cover all states, so the indistinguishability argument applies in the worst case. ◻
+:::
+
+::: proposition
+[]{#prop:query-subproblem-transfer label="prop:query-subproblem-transfer"} If every full-problem solver induces a solver for a fixed subproblem, then any lower bound for that subproblem lifts to the full problem. *(Lean closure: `ClaimClosure.subproblem_hardness_lifts_to_full`.)*
+:::
+
+::: proposition
+[]{#prop:query-randomized-robustness label="prop:query-randomized-robustness"} In \[Q_bool\], for any query set with cardinality $<2^n$, the indistinguishable yes/no pair from Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} forces one decoding error *per random seed* for any seed-indexed decoder from oracle transcripts. Consequently, finite-support randomization does not remove the obstruction: averaging preserves a constant error floor on the hard pair. *(Lean: `indistinguishable_pair_forces_one_error`, `indistinguishable_pair_forces_one_error_per_seed`, `decode_error_sum_two_labels`.)*
+:::
+
+::: proposition
+[]{#prop:query-state-batch-lb label="prop:query-state-batch-lb"} In \[Q_bool\], the same $\Omega(2^n)$ lower bound holds for a state-batch oracle that returns the full Boolean-action utility tuple at each queried state. *(Lean: `emptySufficiency_stateBatch_indistinguishable_pair`, `stateBatchView_eq_if_hidden_untouched`.)*
+:::
+
+::: proposition
+[]{#prop:query-finite-state-generalization label="prop:query-finite-state-generalization"} The empty-subproblem indistinguishability lower-bound core extends from Boolean-vector state spaces to any finite state type with at least two states. *(Lean: `emptySufficiency_query_indistinguishable_pair_finite`, `spikeFinite_empty_not_sufficient`.)*
+:::
+
+::: proposition
+[]{#prop:query-tightness-full-scan label="prop:query-tightness-full-scan"} For the const/spike adversary family used in the query lower bounds, querying all states distinguishes the pair; thus the lower-bound family is tight up to constant factors under full-state scan. *(Lean: `full_query_distinguishes_const_spike_finite`.)*
+:::
+
+::: proposition
+[]{#prop:query-weighted-transfer label="prop:query-weighted-transfer"} Let $w(q)$ be per-query cost and $w_{\min}$ a lower bound on all queried costs. Any cardinality lower bound $|Q|\geq L$ lifts to weighted cost: $$\sum_{q\in Q} w(q)\ \ge\ w_{\min}\cdot L.$$ *(Lean: `weightedQueryCost_ge_min_mul_card`, `weightedQueryCost_ge_min_mul_of_card_lb`.)*
 :::
 
 ::: remark
@@ -1288,7 +1326,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 -   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
--   Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for both 'Opt'-oracle and value-entry interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}, [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"})
+-   Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for 'Opt'-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"}, [\[prop:query-subproblem-transfer\]](#prop:query-subproblem-transfer){reference-type="ref" reference="prop:query-subproblem-transfer"}, [\[prop:query-randomized-robustness\]](#prop:query-randomized-robustness){reference-type="ref" reference="prop:query-randomized-robustness"})
 
 -   Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"})
 
@@ -1306,7 +1344,7 @@ The results provide precise complexity characterizations within the formal model
 
 2.  **Constructive reductions.** The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-3.  **Encoding-regime separation.** Under \[E\], SUFFICIENCY-CHECK is polynomial in $|S|$. Under \[S+ETH\], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under \[Q_bool\], mechanized lower bounds of $\Omega(2^n)$ hold for both 'Opt'-oracle and value-entry interfaces (via the $I=\emptyset$ subproblem). Other intermediate access models remain open.
+3.  **Encoding-regime separation.** Under \[E\], SUFFICIENCY-CHECK is polynomial in $|S|$. Under \[S+ETH\], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under \[Q_bool\], mechanized lower bounds of $\Omega(2^n)$ hold for 'Opt'-oracle, value-entry, and state-batch interfaces (via the $I=\emptyset$ subproblem), with finite-state and weighted-cost transfer closures.
 
 ## The Complexity Redistribution Corollary {#the-complexity-redistribution-corollary .unnumbered}
 
@@ -1338,7 +1376,7 @@ The practical corollaries are regime-indexed and theorem-indexed:
 
 -   **\[E\] and structured regimes:** polynomial-time exact procedures exist (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
--   **\[Q_bool\] query-access lower bounds:** worst-case full-problem query complexity is $\Omega(2^n)$ for both 'Opt'-oracle and value-entry interfaces (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}, [\[prop:query-value-entry-lb\]](#prop:query-value-entry-lb){reference-type="ref" reference="prop:query-value-entry-lb"}).
+-   **\[Q_bool\] query-access lower bounds:** worst-case full-problem query complexity is $\Omega(2^n)$ for 'Opt'-oracle, value-entry, and state-batch interfaces (Propositions [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}--[\[prop:query-state-batch-lb\]](#prop:query-state-batch-lb){reference-type="ref" reference="prop:query-state-batch-lb"}), with subproblem-transfer and randomized-robustness closures.
 
 -   **\[S+ETH\] hard families:** exact minimization inherits exponential worst-case cost (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} together with Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
@@ -1351,7 +1389,7 @@ Hence the design choice is typed: enforce a tractable regime, or adopt weakened 
 
 # Lean 4 Proof Listings {#app:lean}
 
-The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7345 lines across 42 files, with 327 theorem/lemma statements.
+The complete Lean 4 formalization is available in the companion artifact (Zenodo DOI listed on the title page). The mechanization consists of 7741 lines across 42 files, with 350 theorem/lemma statements.
 
 ## What Is Machine-Checked
 
@@ -1365,7 +1403,7 @@ The Lean formalization establishes:
 
 4.  **Query-access lower-bound core:** Formalized Boolean query-model indistinguishability theorem for the full problem via the $I=\emptyset$ subproblem (`emptySufficiency_query_indistinguishable_pair`), plus obstruction-scale identities (`queryComplexityLowerBound`, `exponential_query_complexity`).
 
-**Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
+**Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses. The assumptions themselves are unpacked by an explicit ledger projection theorem (`ClaimClosure.standard_assumption_ledger_unpack`) so dependency tracking is machine-auditable.
 
 ## Polynomial-Time Reduction Definition
 
@@ -1482,7 +1520,23 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
 
   `prop:query-value-entry-lb`                 Full                 `emptySufficiency_valueEntry_indistinguishable_pair`, `valueEntryView_eq_if_hidden_untouched`, `touchedStates_card_le_query_card`                                                                                                                                                                                                                      Mechanized Boolean value-entry query lower bound (full problem via $I=\emptyset$ indistinguishability).
 
+  `prop:query-subproblem-transfer`            Full                 `ClaimClosure.subproblem_hardness_lifts_to_full`                                                                                                                                                                                                                                                                                                       Generic mechanized closure from subproblem hardness to full-problem hardness under restriction maps.
+
+  `prop:query-randomized-robustness`          Full                 `indistinguishable_pair_forces_one_error`, `indistinguishable_pair_forces_one_error_per_seed`, `decode_error_sum_two_labels`                                                                                                                                                                                                                           Seedwise mechanized randomized-robustness closure for indistinguishable yes/no pairs.
+
+  `prop:query-state-batch-lb`                 Full                 `emptySufficiency_stateBatch_indistinguishable_pair`, `stateBatchView_eq_if_hidden_untouched`                                                                                                                                                                                                                                                          Mechanized state-batch query lower bound via hidden-state indistinguishability.
+
+  `prop:query-finite-state-generalization`    Full                 `emptySufficiency_query_indistinguishable_pair_finite`, `spikeFinite_empty_not_sufficient`                                                                                                                                                                                                                                                             Finite-state generalization of the empty-subproblem obstruction core (cardinality $\ge 2$).
+
+  `prop:query-tightness-full-scan`            Full                 `full_query_distinguishes_const_spike_finite`                                                                                                                                                                                                                                                                                                          Mechanized adversary-family tightness witness under full-state scan.
+
+  `prop:query-weighted-transfer`              Full                 `weightedQueryCost_ge_min_mul_card`, `weightedQueryCost_ge_min_mul_of_card_lb`                                                                                                                                                                                                                                                                         Weighted-query transfer: cardinality lower bounds lift to weighted-cost lower bounds.
+
   `prop:set-to-selector`                      Full                 `DecisionProblem.sufficient_implies_selectorSufficient`                                                                                                                                                                                                                                                                                                Set-valued sufficiency implies selector-level sufficiency for any deterministic selector.
+
+  `prop:zero-epsilon-reduction`               Full                 `DecisionProblem.epsOpt_zero_eq_opt`, `DecisionProblem.sufficient_iff_zeroEpsilonSufficient`                                                                                                                                                                                                                                                           Mechanized zero-$\varepsilon$ reduction: exact sufficiency is exactly the $\varepsilon=0$ case.
+
+  `prop:selector-separation`                  Full                 `ClaimClosure.selectorSufficient_not_implies_setSufficient`                                                                                                                                                                                                                                                                                            Mechanized counterexample: selector-sufficiency does not imply set-valued sufficiency.
 
   `prop:attempted-competence-matrix`          Full                 `IntegrityCompetence.overModelVerdict_rational_iff`, `IntegrityCompetence.admissible_matrix_counts`, `IntegrityCompetence.admissible_irrational_strictly_more_than_rational`                                                                                                                                                                           Integrity-preserving matrix is mechanized: one rational admissible cell and three irrational admissible cells.
 
@@ -1562,6 +1616,6 @@ The proofs compile with Lean 4 and contain no `sorry` placeholders. Run `lake bu
 
 All theorems are formalized in Lean 4:
 - Location: `docs/papers/paper4_decision_quotient/proofs/`
-- Lines: 7345
-- Theorems: 327
+- Lines: 7741
+- Theorems: 350
 - `sorry` placeholders: 0

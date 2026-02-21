@@ -60,6 +60,33 @@ If $I$ is sufficient in the set-valued sense (Definition~\ref{def:sufficient}), 
 If $I$ is sufficient, then $s_I=s'_I$ implies $\Opt(s)=\Opt(s')$. Applying any deterministic selector $\sigma$ to equal optimal-action sets yields equal selected actions.
 \end{proof}
 
+\begin{definition}[$\varepsilon$-Optimal Set and $\varepsilon$-Sufficiency]\label{def:epsilon-sufficiency}
+For $\varepsilon \ge 0$, define
+\[
+\Opt_\varepsilon(s)
+:=
+\{a\in A:\forall a'\in A,\ U(a',s)\le U(a,s)+\varepsilon\}.
+\]
+Coordinate set $I$ is \emph{$\varepsilon$-sufficient} if
+\[
+\forall s,s'\in S:\ s_I=s'_I \implies \Opt_\varepsilon(s)=\Opt_\varepsilon(s').
+\]
+\end{definition}
+
+\begin{proposition}[Zero-$\varepsilon$ Reduction]\label{prop:zero-epsilon-reduction}
+Set-valued sufficiency is exactly the $\varepsilon=0$ case:
+\[
+I\text{ sufficient } \iff I\text{ is }0\text{-sufficient}.
+\]
+\textit{(Lean: \nolinkurl{DecisionProblem.epsOpt_zero_eq_opt},
+\nolinkurl{DecisionProblem.sufficient_iff_zeroEpsilonSufficient})}
+\end{proposition}
+
+\begin{proposition}[Selector-Level Separation Witness]\label{prop:selector-separation}
+The converse of Proposition~\ref{prop:set-to-selector} fails in general: there exists a decision problem, selector, and coordinate set $I$ such that $I$ is selector-sufficient but not sufficient in the full set-valued sense.
+\textit{(Lean witness: \nolinkurl{ClaimClosure.selectorSufficient_not_implies_setSufficient}.)}
+\end{proposition}
+
 \begin{definition}[Minimal Sufficient Set]\label{def:minimal-sufficient}
 A sufficient set $I$ is \emph{minimal} if no proper subset $I' \subsetneq I$ is sufficient.
 \end{definition}

@@ -19,6 +19,7 @@ import Mathlib.Data.Finset.Powerset
 import Mathlib.Data.Fintype.Basic
 import Mathlib.Data.Fintype.Card
 import Mathlib.Data.Fintype.Pi
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 namespace DecisionQuotient
 
@@ -469,5 +470,271 @@ theorem emptySufficiency_valueEntry_indistinguishable_pair {n : ℕ}
   have hs0_notin : s0 ∉ touchedStates Q := (Finset.mem_sdiff.mp hs0_mem).2
   refine ⟨s0, hs0_notin, ?_, constTrue_empty_sufficient (n := n), spike_empty_not_sufficient (n := n) hn s0⟩
   exact valueEntryView_eq_if_hidden_untouched Q s0 hs0_notin
+
+/-! ## Randomization-robust decoding consequence
+
+The next two theorems are seedwise statements: indistinguishable yes/no pairs force
+one decoding error per seed, so averaging over any finite-support randomness preserves
+the same lower-bound obstruction.
+-/
+
+theorem decode_error_sum_two_labels (b : Bool) :
+    (if b = true then 0 else 1) + (if b = false then 0 else 1) = (1 : ℕ) := by
+  cases b <;> simp
+
+theorem indistinguishable_pair_forces_one_error
+    {n : ℕ} (hn : 0 < n) (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool))
+    (decode : ({s // s ∈ Q} → Set Bool) → Bool) :
+    ∃ s0 : Fin n → Bool, s0 ∉ Q ∧
+      ((if decode (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1) +
+       (if decode (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1) = (1 : ℕ)) := by
+  rcases emptySufficiency_query_indistinguishable_pair (n := n) hn Q hQ with
+    ⟨s0, hs0_notin, hview, _, _⟩
+  refine ⟨s0, hs0_notin, ?_⟩
+  have hdecode :
+      decode (oracleView Q (constTrueProblem (n := n))) =
+        decode (oracleView Q (spikeProblem (n := n) s0)) := by
+    simpa [hview]
+  let b := decode (oracleView Q (constTrueProblem (n := n)))
+  have hdecode' : decode (oracleView Q (spikeProblem (n := n) s0)) = b := by
+    simpa [b] using hdecode.symm
+  have hsum : (if b = true then 0 else 1) + (if b = false then 0 else 1) = (1 : ℕ) :=
+    decode_error_sum_two_labels b
+  simpa [b, hdecode'] using hsum
+
+theorem indistinguishable_pair_forces_one_error_per_seed
+    {Ω : Type*} {n : ℕ} (hn : 0 < n) (Q : Finset (Fin n → Bool))
+    (hQ : Q.card < Fintype.card (Fin n → Bool))
+    (decode : Ω → ({s // s ∈ Q} → Set Bool) → Bool) :
+    ∃ s0 : Fin n → Bool, s0 ∉ Q ∧
+      ∀ ω : Ω,
+        ((if decode ω (oracleView Q (constTrueProblem (n := n))) = true then 0 else 1) +
+         (if decode ω (oracleView Q (spikeProblem (n := n) s0)) = false then 0 else 1) = (1 : ℕ)) := by
+  rcases emptySufficiency_query_indistinguishable_pair (n := n) hn Q hQ with
+    ⟨s0, hs0_notin, hview, _, _⟩
+  refine ⟨s0, hs0_notin, ?_⟩
+  intro ω
+  have hdecode :
+      decode ω (oracleView Q (constTrueProblem (n := n))) =
+        decode ω (oracleView Q (spikeProblem (n := n) s0)) := by
+    simpa [hview]
+  let b := decode ω (oracleView Q (constTrueProblem (n := n)))
+  have hdecode' : decode ω (oracleView Q (spikeProblem (n := n) s0)) = b := by
+    simpa [b] using hdecode.symm
+  have hsum : (if b = true then 0 else 1) + (if b = false then 0 else 1) = (1 : ℕ) :=
+    decode_error_sum_two_labels b
+  simpa [b, hdecode'] using hsum
+
+/-! ## State-batch query model (third intermediate regime)
+
+A state-batch query returns all Boolean-action utilities at a queried state.
+This is strictly richer than a single value-entry query but still touched-state
+limited; the same indistinguishability lower bound applies.
+-/
+
+abbrev StateBatchQuery (n : ℕ) := Fin n → Bool
+
+def stateBatchView {n : ℕ} (Q : Finset (StateBatchQuery n))
+    (dp : DecisionProblem Bool (Fin n → Bool)) :
+    {s // s ∈ Q} → (ℝ × ℝ) :=
+  fun s => (dp.utility true s.1, dp.utility false s.1)
+
+theorem stateBatchView_eq_if_hidden_untouched {n : ℕ}
+    (Q : Finset (StateBatchQuery n)) (s0 : Fin n → Bool)
+    (hs0_notin : s0 ∉ Q) :
+    stateBatchView Q (constTrueProblem (n := n)) =
+      stateBatchView Q (spikeProblem (n := n) s0) := by
+  funext s
+  have hs_ne : s.1 ≠ s0 := by
+    intro hEq
+    exact hs0_notin (hEq ▸ s.2)
+  ext <;> simp [stateBatchView, constTrueProblem, spikeProblem, hs_ne]
+
+theorem emptySufficiency_stateBatch_indistinguishable_pair {n : ℕ}
+    (hn : 0 < n) (Q : Finset (StateBatchQuery n))
+    (hQ : Q.card < Fintype.card (Fin n → Bool)) :
+    ∃ s0 : Fin n → Bool,
+      s0 ∉ Q ∧
+      (stateBatchView Q (constTrueProblem (n := n)) =
+        stateBatchView Q (spikeProblem (n := n) s0)) ∧
+      (constTrueProblem (n := n)).isSufficient (∅ : Finset (Fin n)) ∧
+      ¬ (spikeProblem (n := n) s0).isSufficient (∅ : Finset (Fin n)) := by
+  have hsubset : Q ⊆ (Finset.univ : Finset (Fin n → Bool)) := by
+    intro s hs
+    exact Finset.mem_univ s
+  have hsdiff : (Finset.univ \ Q).card = Fintype.card (Fin n → Bool) - Q.card := by
+    simpa using Finset.card_sdiff hsubset
+  have hpos : 0 < (Finset.univ \ Q).card := by
+    rw [hsdiff]
+    exact Nat.sub_pos_of_lt hQ
+  rcases Finset.card_pos.mp hpos with ⟨s0, hs0_mem⟩
+  have hs0_notin : s0 ∉ Q := (Finset.mem_sdiff.mp hs0_mem).2
+  refine ⟨s0, hs0_notin, ?_, constTrue_empty_sufficient (n := n), spike_empty_not_sufficient (n := n) hn s0⟩
+  exact stateBatchView_eq_if_hidden_untouched Q s0 hs0_notin
+
+/-! ## Finite-state generalization of the empty-subproblem obstruction
+
+This version removes the Boolean-vector state assumption and states the same
+indistinguishability core for any finite state type (with at least two states).
+-/
+
+instance trivialOneCoordinateSpace (S : Type*) : CoordinateSpace S 1 where
+  Coord := fun _ => Unit
+  proj := fun _ _ => ()
+
+def constTrueProblemFinite (S : Type*) : DecisionProblem Bool S where
+  utility := fun a _ => if a = true then 1 else 0
+
+def spikeProblemFinite {S : Type*} [DecidableEq S] (s0 : S) : DecisionProblem Bool S where
+  utility := fun a s =>
+    if s = s0 then
+      if a = true then 0 else 1
+    else
+      if a = true then 1 else 0
+
+theorem constTrueProblemFinite_opt {S : Type*} (s : S) :
+    (constTrueProblemFinite S).Opt s = {true} := by
+  ext a
+  cases a <;> simp [constTrueProblemFinite, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem spikeProblemFinite_opt_at {S : Type*} [DecidableEq S] (s0 : S) :
+    (spikeProblemFinite s0).Opt s0 = {false} := by
+  ext a
+  cases a <;> simp [spikeProblemFinite, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+theorem spikeProblemFinite_opt_off {S : Type*} [DecidableEq S] (s0 s : S) (hs : s ≠ s0) :
+    (spikeProblemFinite s0).Opt s = {true} := by
+  ext a
+  cases a <;> simp [spikeProblemFinite, hs, DecisionProblem.Opt, DecisionProblem.isOptimal]
+
+def oracleViewFinite {S : Type*} [DecidableEq S] (Q : Finset S)
+    (dp : DecisionProblem Bool S) :
+    {s // s ∈ Q} → Set Bool :=
+  fun s => dp.Opt s.1
+
+theorem oracleViewFinite_eq_of_agree {S : Type*} [DecidableEq S]
+    (Q : Finset S) (dp₁ dp₂ : DecisionProblem Bool S)
+    (hag : ∀ s, s ∈ Q → dp₁.Opt s = dp₂.Opt s) :
+    oracleViewFinite Q dp₁ = oracleViewFinite Q dp₂ := by
+  funext s
+  exact hag s.1 s.2
+
+theorem constTrueFinite_empty_sufficient {S : Type*} :
+    (constTrueProblemFinite S).isSufficient (∅ : Finset (Fin 1)) := by
+  refine (DecisionProblem.emptySet_sufficient_iff_constant (dp := constTrueProblemFinite S)).2 ?_
+  intro s s'
+  rw [constTrueProblemFinite_opt (S := S) s, constTrueProblemFinite_opt (S := S) s']
+
+theorem spikeFinite_empty_not_sufficient
+    {S : Type*} [Fintype S] [DecidableEq S]
+    (hCard : 2 ≤ Fintype.card S) (s0 : S) :
+    ¬ (spikeProblemFinite s0).isSufficient (∅ : Finset (Fin 1)) := by
+  intro hsuff
+  have hsubset : ({s0} : Finset S) ⊆ Finset.univ := by
+    intro s hs
+    exact Finset.mem_univ s
+  have hcardErase : (Finset.univ \ ({s0} : Finset S)).card = Fintype.card S - 1 := by
+    simpa using Finset.card_sdiff hsubset
+  have hposErase : 0 < (Finset.univ \ ({s0} : Finset S)).card := by
+    rw [hcardErase]
+    omega
+  rcases Finset.card_pos.mp hposErase with ⟨s1, hs1⟩
+  have hs1_ne : s1 ≠ s0 := by
+    simpa [Finset.mem_singleton] using (Finset.mem_sdiff.mp hs1).2
+  have hconst :=
+    (DecisionProblem.emptySet_sufficient_iff_constant (dp := spikeProblemFinite s0)).1 hsuff
+  have hEq := hconst s0 s1
+  rw [spikeProblemFinite_opt_at (s0 := s0), spikeProblemFinite_opt_off (s0 := s0) (s := s1) hs1_ne] at hEq
+  have hsets : ({false} : Set Bool) ≠ ({true} : Set Bool) := by
+    intro hset
+    have hmem : (false : Bool) ∈ ({true} : Set Bool) := by
+      simpa [hset] using (show (false : Bool) ∈ ({false} : Set Bool) by simp)
+    have : (false : Bool) = true := by simpa using hmem
+    exact Bool.false_ne_true this
+  exact hsets hEq
+
+theorem emptySufficiency_query_indistinguishable_pair_finite
+    {S : Type*} [Fintype S] [DecidableEq S]
+    (hCard : 2 ≤ Fintype.card S)
+    (Q : Finset S) (hQ : Q.card < Fintype.card S) :
+    ∃ s0 : S,
+      s0 ∉ Q ∧
+      (oracleViewFinite Q (constTrueProblemFinite S) =
+        oracleViewFinite Q (spikeProblemFinite s0)) ∧
+      (constTrueProblemFinite S).isSufficient (∅ : Finset (Fin 1)) ∧
+      ¬ (spikeProblemFinite s0).isSufficient (∅ : Finset (Fin 1)) := by
+  have hsubset : Q ⊆ (Finset.univ : Finset S) := by
+    intro s hs
+    exact Finset.mem_univ s
+  have hsdiff : (Finset.univ \ Q).card = Fintype.card S - Q.card := by
+    simpa using Finset.card_sdiff hsubset
+  have hpos : 0 < (Finset.univ \ Q).card := by
+    rw [hsdiff]
+    exact Nat.sub_pos_of_lt hQ
+  rcases Finset.card_pos.mp hpos with ⟨s0, hs0_mem⟩
+  have hs0_notin : s0 ∉ Q := (Finset.mem_sdiff.mp hs0_mem).2
+  refine ⟨s0, hs0_notin, ?_, constTrueFinite_empty_sufficient (S := S),
+    spikeFinite_empty_not_sufficient (S := S) hCard s0⟩
+  apply oracleViewFinite_eq_of_agree (Q := Q)
+  intro s hsQ
+  have hs_ne : s ≠ s0 := by
+    intro hEq
+    exact hs0_notin (hEq ▸ hsQ)
+  rw [constTrueProblemFinite_opt (S := S) s, spikeProblemFinite_opt_off (s0 := s0) (s := s) hs_ne]
+
+theorem full_query_distinguishes_const_spike_finite
+    {S : Type*} [Fintype S] [DecidableEq S] (s0 : S) :
+    oracleViewFinite (Q := (Finset.univ : Finset S)) (constTrueProblemFinite S) ≠
+      oracleViewFinite (Q := (Finset.univ : Finset S)) (spikeProblemFinite s0) := by
+  intro hEq
+  have hAt := congrArg (fun f => f ⟨s0, by simp⟩) hEq
+  have hAt' : ({true} : Set Bool) = ({false} : Set Bool) := by
+    simpa [oracleViewFinite, constTrueProblemFinite_opt, spikeProblemFinite_opt_at] using hAt
+  have hsets : ({true} : Set Bool) ≠ ({false} : Set Bool) := by
+    intro hset
+    have hmem : (true : Bool) ∈ ({false} : Set Bool) := by
+      simpa [hset] using (show (true : Bool) ∈ ({true} : Set Bool) by simp)
+    have : (true : Bool) = false := by simpa using hmem
+    exact (by decide : (true : Bool) ≠ false) this
+  exact hsets hAt'
+
+/-! ## Weighted-query transfer lemmas -/
+
+def weightedQueryCost {α : Type*} (w : α → ℕ) (Q : Finset α) : ℕ :=
+  Q.sum w
+
+theorem weightedQueryCost_ge_min_mul_card
+    {α : Type*} (Q : Finset α) (w : α → ℕ) (wmin : ℕ)
+    (hmin : ∀ q ∈ Q, wmin ≤ w q) :
+    wmin * Q.card ≤ weightedQueryCost w Q := by
+  classical
+  unfold weightedQueryCost
+  revert hmin
+  refine Finset.induction_on Q ?base ?step
+  · intro _
+    simp
+  · intro a Q ha hIH hmin
+    have hminA : wmin ≤ w a := hmin a (by simp [ha])
+    have hminQ : ∀ q ∈ Q, wmin ≤ w q := by
+      intro q hq
+      exact hmin q (by simp [hq, ha])
+    have hIH' : wmin * Q.card ≤ Q.sum w := hIH hminQ
+    have hcard : (insert a Q).card = Q.card + 1 := Finset.card_insert_of_not_mem ha
+    calc
+      wmin * (insert a Q).card = wmin * (Q.card + 1) := by rw [hcard]
+      _ = wmin * Q.card + wmin := by simpa using Nat.mul_succ wmin Q.card
+      _ ≤ Q.sum w + w a := by omega
+      _ = (insert a Q).sum w := by
+        simp [Finset.sum_insert, ha, Nat.add_comm]
+
+theorem weightedQueryCost_ge_min_mul_of_card_lb
+    {α : Type*} (Q : Finset α) (w : α → ℕ) (wmin qlb : ℕ)
+    (hmin : ∀ q ∈ Q, wmin ≤ w q) (hcard : qlb ≤ Q.card) :
+    wmin * qlb ≤ weightedQueryCost w Q := by
+  have h1 : wmin * qlb ≤ wmin * Q.card := Nat.mul_le_mul_left _ hcard
+  have h2 : wmin * Q.card ≤ weightedQueryCost w Q :=
+    weightedQueryCost_ge_min_mul_card Q w wmin hmin
+  exact le_trans h1 h2
 
 end DecisionQuotient

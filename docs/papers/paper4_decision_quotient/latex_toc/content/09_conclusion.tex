@@ -23,7 +23,7 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 \item \textbf{MINIMUM-SUFFICIENT-SET} is \coNP-complete (Theorem~\ref{thm:minsuff-conp})
 \item \textbf{ANCHOR-SUFFICIENCY} is $\SigmaP{2}$-complete (Theorem~\ref{thm:anchor-sigma2p})
 \item An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem~\ref{thm:dichotomy})
-\item Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for both `Opt`-oracle and value-entry interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem (Propositions~\ref{prop:query-regime-obstruction}, \ref{prop:query-value-entry-lb})
+\item Full intermediate query-access lower bounds are formalized in Boolean query submodels: $\Omega(2^n)$ worst-case queries for SUFFICIENCY-CHECK for `Opt`-oracle, value-entry, and state-batch interfaces via indistinguishable yes/no pairs on the $I=\emptyset$ subproblem, with explicit subproblem-to-full transfer and seedwise randomized robustness (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-state-batch-lb}, \ref{prop:query-subproblem-transfer}, \ref{prop:query-randomized-robustness})
 \item Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem~\ref{thm:tractable})
 \end{itemize}
 
@@ -42,7 +42,7 @@ The results provide precise complexity characterizations within the formal model
 
 \item \textbf{Constructive reductions.} The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-\item \textbf{Encoding-regime separation.} Under [E], SUFFICIENCY-CHECK is polynomial in $|S|$. Under [S+ETH], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under [Q\_bool], mechanized lower bounds of $\Omega(2^n)$ hold for both `Opt`-oracle and value-entry interfaces (via the $I=\emptyset$ subproblem). Other intermediate access models remain open.
+\item \textbf{Encoding-regime separation.} Under [E], SUFFICIENCY-CHECK is polynomial in $|S|$. Under [S+ETH], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under [Q\_bool], mechanized lower bounds of $\Omega(2^n)$ hold for `Opt`-oracle, value-entry, and state-batch interfaces (via the $I=\emptyset$ subproblem), with finite-state and weighted-cost transfer closures.
 \end{enumerate}
 
 \subsection*{The Complexity Redistribution Corollary}
@@ -71,7 +71,7 @@ Several questions remain for future work:
 The practical corollaries are regime-indexed and theorem-indexed:
 \begin{itemize}
 \item \textbf{[E] and structured regimes:} polynomial-time exact procedures exist (Theorem~\ref{thm:tractable}).
-\item \textbf{[Q\_bool] query-access lower bounds:} worst-case full-problem query complexity is $\Omega(2^n)$ for both `Opt`-oracle and value-entry interfaces (Propositions~\ref{prop:query-regime-obstruction}, \ref{prop:query-value-entry-lb}).
+\item \textbf{[Q\_bool] query-access lower bounds:} worst-case full-problem query complexity is $\Omega(2^n)$ for `Opt`-oracle, value-entry, and state-batch interfaces (Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-state-batch-lb}), with subproblem-transfer and randomized-robustness closures.
 \item \textbf{[S+ETH] hard families:} exact minimization inherits exponential worst-case cost (Theorem~\ref{thm:dichotomy} together with Theorem~\ref{thm:sufficiency-conp}).
 \item \textbf{[S\_bool] mechanized criterion:} minimization reduces to relevance-cardinality constraints (Corollary~\ref{cor:practice-diagnostic}).
 \item \textbf{Redistribution consequences:} omitted native coverage externalizes work with explicit growth/amortization laws (Theorems~\ref{thm:tax-conservation}--\ref{thm:amortization}).

@@ -66,6 +66,46 @@ In the mechanized Boolean value-entry query submodel [Q\_bool], for any determin
 The theorem \texttt{emptySufficiency\_valueEntry\_indistinguishable\_pair} constructs, for any query set of cardinality $<2^n$, an unqueried hidden state $s_0$ and a yes/no instance pair that agree on all queried values but disagree on $\emptyset$-sufficiency. The auxiliary bound \texttt{touchedStates\_card\_le\_query\_card} ensures that fewer than $2^n$ value-entry queries cannot cover all states, so the indistinguishability argument applies in the worst case.
 \end{proof}
 
+\begin{proposition}[Subproblem-to-Full Transfer Rule]\label{prop:query-subproblem-transfer}
+If every full-problem solver induces a solver for a fixed subproblem, then any lower bound for that subproblem lifts to the full problem.
+\textit{(Lean closure: \nolinkurl{ClaimClosure.subproblem_hardness_lifts_to_full}.)}
+\end{proposition}
+
+\begin{proposition}[Randomized Robustness (Seedwise)]\label{prop:query-randomized-robustness}
+In [Q\_bool], for any query set with cardinality $<2^n$, the indistinguishable yes/no pair from Proposition~\ref{prop:query-regime-obstruction} forces one decoding error \emph{per random seed} for any seed-indexed decoder from oracle transcripts.
+Consequently, finite-support randomization does not remove the obstruction: averaging preserves a constant error floor on the hard pair.
+\textit{(Lean: \nolinkurl{indistinguishable_pair_forces_one_error},
+\nolinkurl{indistinguishable_pair_forces_one_error_per_seed},
+\nolinkurl{decode_error_sum_two_labels}.)}
+\end{proposition}
+
+\begin{proposition}[State-Batch Query Lower Bound]\label{prop:query-state-batch-lb}
+In [Q\_bool], the same $\Omega(2^n)$ lower bound holds for a state-batch oracle that returns the full Boolean-action utility tuple at each queried state.
+\textit{(Lean: \nolinkurl{emptySufficiency_stateBatch_indistinguishable_pair},
+\nolinkurl{stateBatchView_eq_if_hidden_untouched}.)}
+\end{proposition}
+
+\begin{proposition}[Finite-State Empty-Subproblem Generalization]\label{prop:query-finite-state-generalization}
+The empty-subproblem indistinguishability lower-bound core extends from Boolean-vector state spaces to any finite state type with at least two states.
+\textit{(Lean: \nolinkurl{emptySufficiency_query_indistinguishable_pair_finite},
+\nolinkurl{spikeFinite_empty_not_sufficient}.)}
+\end{proposition}
+
+\begin{proposition}[Adversary-Family Tightness by Full Scan]\label{prop:query-tightness-full-scan}
+For the const/spike adversary family used in the query lower bounds, querying all states distinguishes the pair; thus the lower-bound family is tight up to constant factors under full-state scan.
+\textit{(Lean: \nolinkurl{full_query_distinguishes_const_spike_finite}.)}
+\end{proposition}
+
+\begin{proposition}[Weighted Query-Cost Transfer]\label{prop:query-weighted-transfer}
+Let $w(q)$ be per-query cost and $w_{\min}$ a lower bound on all queried costs.
+Any cardinality lower bound $|Q|\geq L$ lifts to weighted cost:
+\[
+\sum_{q\in Q} w(q)\ \ge\ w_{\min}\cdot L.
+\]
+\textit{(Lean: \nolinkurl{weightedQueryCost_ge_min_mul_card},
+\nolinkurl{weightedQueryCost_ge_min_mul_of_card_lb}.)}
+\end{proposition}
+
 \begin{remark}[Instantiation of Definitions~\ref{def:structural-complexity} and~\ref{def:representational-hardness}]
 Theorem~\ref{thm:dichotomy} and Propositions~\ref{prop:query-regime-obstruction}--\ref{prop:query-value-entry-lb} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, query access yields $\Omega(2^n)$ lower bounds in mechanized Boolean submodels (for both `Opt` and value-entry interfaces), and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
 \end{remark}

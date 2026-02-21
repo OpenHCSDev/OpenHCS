@@ -17,6 +17,7 @@ The Lean formalization establishes:
 \end{enumerate}
 
 \textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
+The assumptions themselves are unpacked by an explicit ledger projection theorem (\nolinkurl{ClaimClosure.standard_assumption_ledger_unpack}) so dependency tracking is machine-auditable.
 
 \subsection{Polynomial-Time Reduction Definition}
 
@@ -150,9 +151,33 @@ Mechanized Boolean query-regime full lower-bound core (via $I=\emptyset$ indisti
 \nolinkurl{prop:query-value-entry-lb} & Full &
 \nolinkurl{emptySufficiency_valueEntry_indistinguishable_pair}, \nolinkurl{valueEntryView_eq_if_hidden_untouched}, \nolinkurl{touchedStates_card_le_query_card} &
 Mechanized Boolean value-entry query lower bound (full problem via $I=\emptyset$ indistinguishability). \\
+\nolinkurl{prop:query-subproblem-transfer} & Full &
+\nolinkurl{ClaimClosure.subproblem_hardness_lifts_to_full} &
+Generic mechanized closure from subproblem hardness to full-problem hardness under restriction maps. \\
+\nolinkurl{prop:query-randomized-robustness} & Full &
+\nolinkurl{indistinguishable_pair_forces_one_error}, \nolinkurl{indistinguishable_pair_forces_one_error_per_seed}, \nolinkurl{decode_error_sum_two_labels} &
+Seedwise mechanized randomized-robustness closure for indistinguishable yes/no pairs. \\
+\nolinkurl{prop:query-state-batch-lb} & Full &
+\nolinkurl{emptySufficiency_stateBatch_indistinguishable_pair}, \nolinkurl{stateBatchView_eq_if_hidden_untouched} &
+Mechanized state-batch query lower bound via hidden-state indistinguishability. \\
+\nolinkurl{prop:query-finite-state-generalization} & Full &
+\nolinkurl{emptySufficiency_query_indistinguishable_pair_finite}, \nolinkurl{spikeFinite_empty_not_sufficient} &
+Finite-state generalization of the empty-subproblem obstruction core (cardinality $\ge 2$). \\
+\nolinkurl{prop:query-tightness-full-scan} & Full &
+\nolinkurl{full_query_distinguishes_const_spike_finite} &
+Mechanized adversary-family tightness witness under full-state scan. \\
+\nolinkurl{prop:query-weighted-transfer} & Full &
+\nolinkurl{weightedQueryCost_ge_min_mul_card}, \nolinkurl{weightedQueryCost_ge_min_mul_of_card_lb} &
+Weighted-query transfer: cardinality lower bounds lift to weighted-cost lower bounds. \\
 \nolinkurl{prop:set-to-selector} & Full &
 \nolinkurl{DecisionProblem.sufficient_implies_selectorSufficient} &
 Set-valued sufficiency implies selector-level sufficiency for any deterministic selector. \\
+\nolinkurl{prop:zero-epsilon-reduction} & Full &
+\nolinkurl{DecisionProblem.epsOpt_zero_eq_opt}, \nolinkurl{DecisionProblem.sufficient_iff_zeroEpsilonSufficient} &
+Mechanized zero-$\varepsilon$ reduction: exact sufficiency is exactly the $\varepsilon=0$ case. \\
+\nolinkurl{prop:selector-separation} & Full &
+\nolinkurl{ClaimClosure.selectorSufficient_not_implies_setSufficient} &
+Mechanized counterexample: selector-sufficiency does not imply set-valued sufficiency. \\
 \nolinkurl{prop:attempted-competence-matrix} & Full &
 \nolinkurl{IntegrityCompetence.overModelVerdict_rational_iff}, \nolinkurl{IntegrityCompetence.admissible_matrix_counts}, \nolinkurl{IntegrityCompetence.admissible_irrational_strictly_more_than_rational} &
 Integrity-preserving matrix is mechanized: one rational admissible cell and three irrational admissible cells. \\
