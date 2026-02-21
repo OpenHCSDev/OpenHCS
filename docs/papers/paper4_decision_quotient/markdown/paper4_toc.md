@@ -43,6 +43,20 @@ Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:e
 
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Outside those regimes, the succinct model yields hardness.
 
+## Hardness--Recovery Reading Map
+
+Theorems in this paper are intended to be read as hardness/recovery pairs for the same fixed decision relation:
+
+1.  **Sufficiency checking:** \[S\] coNP-complete in the general succinct regime (Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}), paired with polynomial-time recovery under explicit-state and structured-access regimes (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
+
+2.  **Minimal sufficient sets:** \[S\] coNP-complete in general (Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"}), paired with the collapse criterion and relevance-computation recovery route (Theorems [\[thm:minsuff-collapse\]](#thm:minsuff-collapse){reference-type="ref" reference="thm:minsuff-collapse"}, [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
+
+3.  **Anchor sufficiency:** $\SigmaP{2}$-complete in the general anchored formulation (Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"}); no general polynomial-time recovery condition is established in this model.
+
+*(Lean anchors for this map: `ClaimClosure.sufficiency_conp_complete_conditional`, `ClaimClosure.minsuff_conp_complete_conditional`, `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `ClaimClosure.tractable_subcases_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`.)*
+
+An operational criterion follows later from the same chain: once decision-site count exceeds the amortization threshold $n^*$, avoiding structural identification is more expensive than paying the one-time centralization cost (Theorem [\[thm:amortization\]](#thm:amortization){reference-type="ref" reference="thm:amortization"}). *(Lean: `HardnessDistribution.complete_model_dominates_after_threshold`, `HardnessDistribution.totalExternalWork_eq_n_mul_gapCard`.)*
+
 ## Landscape Summary
 
 **When is sufficiency checking tractable?** We identify three sufficient conditions:
@@ -325,6 +339,10 @@ This section establishes the computational complexity of determining which state
 
 Under the model contract of Section [\[sec:model-contract\]](#sec:model-contract){reference-type="ref" reference="sec:model-contract"} and the succinct encoding of Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}, these results place exact relevance identification beyond NP-completeness: in the worst case, finding (or certifying) minimal decision-relevant sets is computationally intractable.
 
+#### Reading convention for this section.
+
+Each hardness theorem below is paired with a recovery boundary for the same decision relation: when structural-access assumptions in Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} hold, polynomial-time exact procedures are recovered; when they fail in \[S\], the stated hardness applies. *(Lean map handles: `ClaimClosure.sufficiency_conp_complete_conditional`, `ClaimClosure.minsuff_conp_complete_conditional`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `ClaimClosure.tractable_subcases_conditional`.)*
+
 ## Problem Definitions
 
 ::: definition
@@ -406,6 +424,10 @@ For $\text{Opt}$ to be constant, $\varphi(a)$ must be true for all assignments $
 ($\Leftarrow$) If $\varphi$ is a tautology, then $U(\text{accept}, a) = 1 > 0 = U(\text{reject}, a)$ for all assignments $a$. Thus $\text{Opt}(s) = \{\text{accept}\}$ for all states $s$, making $I = \emptyset$ sufficient. ◻
 :::
 
+#### Immediate recovery boundary (SUFFICIENCY-CHECK).
+
+Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"} is the \[S\] general-case hardness statement. For the same sufficiency relation, Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} gives polynomial-time recovery under explicit-state, separable, and tree-structured regimes. *(Lean bridge handles: `ClaimClosure.sufficiency_conp_complete_conditional`, `ClaimClosure.tractable_subcases_conditional`, `ClaimClosure.tractable_bounded_core`, `ClaimClosure.tractable_separable_core`, `ClaimClosure.tractable_tree_core`.)*
+
 #### Mechanized strengthening (all coordinates relevant).
 
 The reduction above establishes coNP-hardness using a single witness set $I=\emptyset$. For the ETH-based lower bound in Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"}, we additionally need worst-case instances where the minimal sufficient set has *linear* size.
@@ -429,6 +451,10 @@ We formalized a strengthened reduction in Lean 4: given a Boolean formula $\varp
 
 **coNP-hardness:** The $k=0$ case asks whether no coordinates are relevant, i.e., whether $\emptyset$ is sufficient. This is exactly SUFFICIENCY-CHECK, which is coNP-complete by Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}. ◻
 :::
+
+#### Immediate recovery boundary (MINIMUM-SUFFICIENT-SET).
+
+Theorem [\[thm:minsuff-conp\]](#thm:minsuff-conp){reference-type="ref" reference="thm:minsuff-conp"} pairs with Theorem [\[thm:minsuff-collapse\]](#thm:minsuff-collapse){reference-type="ref" reference="thm:minsuff-collapse"}: exact minimization complexity is governed by relevance-cardinality once the collapse is applied. Recovery then depends on computing relevance efficiently, with structured-access assumptions from Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"} giving the corresponding route for the underlying sufficiency computations. *(Lean bridge handles: `ClaimClosure.minsuff_conp_complete_conditional`, `ClaimClosure.minsuff_collapse_core`, `ClaimClosure.minsuff_collapse_to_conp_conditional`, `Sigma2PHardness.min_sufficient_set_iff_relevant_card`, `ClaimClosure.tractable_subcases_conditional`.)*
 
 ## Anchor Sufficiency (Fixed Coordinates)
 
@@ -474,6 +500,10 @@ If $\exists x^\star \, \forall y \, \varphi(x^\star,y)=1$, then for any $y$ we h
 
 Hence the subcube for this $x$ is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true. ◻
 :::
+
+#### Immediate boundary statement (ANCHOR-SUFFICIENCY).
+
+Theorem [\[thm:anchor-sigma2p\]](#thm:anchor-sigma2p){reference-type="ref" reference="thm:anchor-sigma2p"} remains a second-level hardness statement in the anchored formulation; unlike MINIMUM-SUFFICIENT-SET, no general collapse to relevance counting is established here, so the corresponding tractability status remains open in this model. *(Lean anchor handles: `ClaimClosure.anchor_sigma2p_reduction_core`, `ClaimClosure.anchor_sigma2p_complete_conditional`, `anchor_sufficiency_sigma2p`.)*
 
 ## Tractable Subcases
 

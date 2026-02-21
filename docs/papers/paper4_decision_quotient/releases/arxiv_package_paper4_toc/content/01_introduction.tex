@@ -24,6 +24,25 @@ ANCHOR-SUFFICIENCY & $\SigmaP{2}$-complete & Open \\
 
 The tractable cases are stated with explicit encoding assumptions (Section~\ref{sec:encoding}). Outside those regimes, the succinct model yields hardness.
 
+\subsection{Hardness--Recovery Reading Map}
+
+Theorems in this paper are intended to be read as hardness/recovery pairs for the same fixed decision relation:
+\begin{enumerate}
+\item \textbf{Sufficiency checking:} [S] coNP-complete in the general succinct regime (Theorem~\ref{thm:sufficiency-conp}), paired with polynomial-time recovery under explicit-state and structured-access regimes (Theorem~\ref{thm:tractable}).
+\item \textbf{Minimal sufficient sets:} [S] coNP-complete in general (Theorem~\ref{thm:minsuff-conp}), paired with the collapse criterion and relevance-computation recovery route (Theorems~\ref{thm:minsuff-collapse}, \ref{thm:tractable}).
+\item \textbf{Anchor sufficiency:} $\SigmaP{2}$-complete in the general anchored formulation (Theorem~\ref{thm:anchor-sigma2p}); no general polynomial-time recovery condition is established in this model.
+\end{enumerate}
+\textit{(Lean anchors for this map: \nolinkurl{ClaimClosure.sufficiency_conp_complete_conditional},
+\nolinkurl{ClaimClosure.minsuff_conp_complete_conditional},
+\nolinkurl{ClaimClosure.minsuff_collapse_core},
+\nolinkurl{ClaimClosure.anchor_sigma2p_complete_conditional},
+\nolinkurl{ClaimClosure.tractable_subcases_conditional},
+\nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card}.)}
+
+An operational criterion follows later from the same chain: once decision-site count exceeds the amortization threshold \(n^*\), avoiding structural identification is more expensive than paying the one-time centralization cost (Theorem~\ref{thm:amortization}).
+\textit{(Lean: \nolinkurl{HardnessDistribution.complete_model_dominates_after_threshold},
+\nolinkurl{HardnessDistribution.totalExternalWork_eq_n_mul_gapCard}.)}
+
 \subsection{Landscape Summary}
 
 \textbf{When is sufficiency checking tractable?} We identify three sufficient conditions:

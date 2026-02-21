@@ -11,6 +11,13 @@ This section establishes the computational complexity of determining which state
 
 Under the model contract of Section~\ref{sec:model-contract} and the succinct encoding of Section~\ref{sec:encoding}, these results place exact relevance identification beyond NP-completeness: in the worst case, finding (or certifying) minimal decision-relevant sets is computationally intractable.
 
+\paragraph{Reading convention for this section.}
+Each hardness theorem below is paired with a recovery boundary for the same decision relation: when structural-access assumptions in Theorem~\ref{thm:tractable} hold, polynomial-time exact procedures are recovered; when they fail in [S], the stated hardness applies.
+\textit{(Lean map handles: \nolinkurl{ClaimClosure.sufficiency_conp_complete_conditional},
+\nolinkurl{ClaimClosure.minsuff_conp_complete_conditional},
+\nolinkurl{ClaimClosure.anchor_sigma2p_complete_conditional},
+\nolinkurl{ClaimClosure.tractable_subcases_conditional}.)}
+
 \subsection{Problem Definitions}
 
 \begin{definition}[Decision Problem Encoding]
@@ -103,6 +110,14 @@ For $\text{Opt}$ to be constant, $\varphi(a)$ must be true for all assignments $
 ($\Leftarrow$) If $\varphi$ is a tautology, then $U(\text{accept}, a) = 1 > 0 = U(\text{reject}, a)$ for all assignments $a$. Thus $\text{Opt}(s) = \{\text{accept}\}$ for all states $s$, making $I = \emptyset$ sufficient.
 \end{proof}
 
+\paragraph{Immediate recovery boundary (SUFFICIENCY-CHECK).}
+Theorem~\ref{thm:sufficiency-conp} is the [S] general-case hardness statement. For the same sufficiency relation, Theorem~\ref{thm:tractable} gives polynomial-time recovery under explicit-state, separable, and tree-structured regimes.
+\textit{(Lean bridge handles: \nolinkurl{ClaimClosure.sufficiency_conp_complete_conditional},
+\nolinkurl{ClaimClosure.tractable_subcases_conditional},
+\nolinkurl{ClaimClosure.tractable_bounded_core},
+\nolinkurl{ClaimClosure.tractable_separable_core},
+\nolinkurl{ClaimClosure.tractable_tree_core}.)}
+
 \paragraph{Mechanized strengthening (all coordinates relevant).}
 The reduction above establishes coNP-hardness using a single witness set $I=\emptyset$. For the ETH-based lower bound in Theorem~\ref{thm:dichotomy}, we additionally need worst-case instances where the minimal sufficient set has \emph{linear} size.
 
@@ -136,6 +151,14 @@ where $\text{Relevant} = \{i : \exists s, s'.\; s \text{ differs from } s' \text
 
 \textbf{coNP-hardness:} The $k=0$ case asks whether no coordinates are relevant, i.e., whether $\emptyset$ is sufficient. This is exactly SUFFICIENCY-CHECK, which is coNP-complete by Theorem~\ref{thm:sufficiency-conp}.
 \end{proof}
+
+\paragraph{Immediate recovery boundary (MINIMUM-SUFFICIENT-SET).}
+Theorem~\ref{thm:minsuff-conp} pairs with Theorem~\ref{thm:minsuff-collapse}: exact minimization complexity is governed by relevance-cardinality once the collapse is applied. Recovery then depends on computing relevance efficiently, with structured-access assumptions from Theorem~\ref{thm:tractable} giving the corresponding route for the underlying sufficiency computations.
+\textit{(Lean bridge handles: \nolinkurl{ClaimClosure.minsuff_conp_complete_conditional},
+\nolinkurl{ClaimClosure.minsuff_collapse_core},
+\nolinkurl{ClaimClosure.minsuff_collapse_to_conp_conditional},
+\nolinkurl{Sigma2PHardness.min_sufficient_set_iff_relevant_card},
+\nolinkurl{ClaimClosure.tractable_subcases_conditional}.)}
 
 \subsection{Anchor Sufficiency (Fixed Coordinates)}
 
@@ -197,6 +220,12 @@ Conversely, fix $x$ and suppose $\exists y_f$ with $\varphi(x,y_f)=0$.
 \end{itemize}
 Hence the subcube for this $x$ is not constant. Thus an anchor assignment exists iff the $\exists\forall$-SAT instance is true.
 \end{proof}
+
+\paragraph{Immediate boundary statement (ANCHOR-SUFFICIENCY).}
+Theorem~\ref{thm:anchor-sigma2p} remains a second-level hardness statement in the anchored formulation; unlike MINIMUM-SUFFICIENT-SET, no general collapse to relevance counting is established here, so the corresponding tractability status remains open in this model.
+\textit{(Lean anchor handles: \nolinkurl{ClaimClosure.anchor_sigma2p_reduction_core},
+\nolinkurl{ClaimClosure.anchor_sigma2p_complete_conditional},
+\nolinkurl{anchor_sufficiency_sigma2p}.)}
 
 \subsection{Tractable Subcases}
 

@@ -4,8 +4,8 @@
 
 This directory contains the complete Lean 4 formalization for Decision Quotient.
 
-- **Lines:** 6255
-- **Theorems:** 265
+- **Lines:** 7071
+- **Theorems:** 310
 - **`sorry` placeholders:** 0
 
 
@@ -27,6 +27,7 @@ lake build
 |------|--------|
 | `AlgorithmComplexity.lean` | AlgorithmComplexity |
 | `Basic.lean` | Basic |
+| `ClaimClosure.lean` | ClaimClosure |
 | `Complexity.lean` | Complexity |
 | `ComplexityMain.lean` | ComplexityMain |
 | `Computation.lean` | Computation |
@@ -36,6 +37,7 @@ lake build
 | `ValueOfInformation.lean` | ValueOfInformation |
 | `Finite.lean` | Finite |
 | `ApproximationHardness.lean` | ApproximationHardness |
+| `ConfigReduction.lean` | ConfigReduction |
 | `CountingComplexity.lean` | CountingComplexity |
 | `CoveringLowerBound.lean` | CoveringLowerBound |
 | `ETH.lean` | ETH |

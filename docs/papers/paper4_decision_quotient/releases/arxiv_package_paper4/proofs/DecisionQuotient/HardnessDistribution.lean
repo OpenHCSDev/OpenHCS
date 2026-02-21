@@ -432,6 +432,90 @@ def saturatingSiteCost (K : ℕ) (n : ℕ) : ℕ :=
 def generalizedTotalDOF (central : ℕ) (siteCost : ℕ → ℕ) (n : ℕ) : ℕ :=
   central + siteCost n
 
+/-- Pointwise nonlinear dominance:
+    if right-site accumulation at n is bounded by B and wrong-site accumulation
+    at n is at least n, then crossing centralRight + B yields strict dominance. -/
+theorem generalized_right_dominates_wrong_pointwise
+    (centralRight centralWrong B n : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : siteRight n ≤ B)
+    (hWrongLower : n ≤ siteWrong n)
+    (hn : n > centralRight + B) :
+    generalizedTotalDOF centralRight siteRight n <
+      generalizedTotalDOF centralWrong siteWrong n := by
+  unfold generalizedTotalDOF
+  have hRightLe : centralRight + siteRight n ≤ centralRight + B :=
+    Nat.add_le_add_left hRightBound centralRight
+  have hRightLt : centralRight + siteRight n < n := lt_of_le_of_lt hRightLe hn
+  have hWrongGe : n ≤ centralWrong + siteWrong n := by
+    exact le_trans hWrongLower (Nat.le_add_left _ _)
+  exact lt_of_lt_of_le hRightLt hWrongGe
+
+/-- Nonlinear dominance by growth separation:
+    bounded right-site accumulation versus identity-lower-bounded wrong-site accumulation. -/
+theorem generalized_right_dominates_wrong_of_bounded_vs_identity_lower
+    (centralRight centralWrong B n : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : ∀ m, siteRight m ≤ B)
+    (hWrongLower : ∀ m, m ≤ siteWrong m)
+    (hn : n > centralRight + B) :
+    generalizedTotalDOF centralRight siteRight n <
+      generalizedTotalDOF centralWrong siteWrong n := by
+  exact generalized_right_dominates_wrong_pointwise
+    centralRight centralWrong B n siteRight siteWrong
+    (hRightBound n) (hWrongLower n) hn
+
+/-- Eventual nonlinear dominance:
+    if right-site accumulation is globally bounded and wrong-site accumulation
+    eventually dominates identity, right architecture eventually dominates. -/
+theorem generalized_right_eventually_dominates_wrong
+    (centralRight centralWrong B N : ℕ)
+    (siteRight siteWrong : ℕ → ℕ)
+    (hRightBound : ∀ m, siteRight m ≤ B)
+    (hWrongLowerFrom : ∀ m, m ≥ N → m ≤ siteWrong m) :
+    ∃ N0, ∀ n ≥ N0,
+      generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n := by
+  refine ⟨max N (centralRight + B + 1), ?_⟩
+  intro n hn
+  have hN : n ≥ N := le_trans (Nat.le_max_left _ _) hn
+  have hBound : centralRight + B + 1 ≤ n := le_trans (Nat.le_max_right _ _) hn
+  have hnStrict : n > centralRight + B := by
+    exact lt_of_lt_of_le (Nat.lt_succ_self (centralRight + B)) hBound
+  exact generalized_right_dominates_wrong_pointwise
+    centralRight centralWrong B n siteRight siteWrong
+    (hRightBound n) (hWrongLowerFrom n hN) hnStrict
+
+/-- Boundary theorem: without wrong-side growth lower bounds, strict dominance is not guaranteed. -/
+theorem generalized_dominance_can_fail_without_wrong_growth :
+    ∃ (centralRight centralWrong : ℕ) (siteRight siteWrong : ℕ → ℕ),
+      (¬ ∀ m, m ≤ siteWrong m) ∧
+      (∀ n, ¬ generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n) := by
+  refine ⟨1, 0, (fun _ => 0), (fun _ => 0), ?_, ?_⟩
+  · intro h
+    exact (Nat.not_succ_le_zero 0) (h 1)
+  · intro n
+    simp [generalizedTotalDOF]
+
+/-- Boundary theorem: without a right-side boundedness assumption,
+    strict dominance is not guaranteed even when wrong-side growth is linear. -/
+theorem generalized_dominance_can_fail_without_right_boundedness :
+    ∃ (centralRight centralWrong : ℕ) (siteRight siteWrong : ℕ → ℕ),
+      (¬ ∃ B, ∀ m, siteRight m ≤ B) ∧
+      (∀ m, m ≤ siteWrong m) ∧
+      (∀ n, ¬ generalizedTotalDOF centralRight siteRight n <
+        generalizedTotalDOF centralWrong siteWrong n) := by
+  refine ⟨0, 0, (fun m => m + 1), (fun m => m), ?_, ?_, ?_⟩
+  · intro hBound
+    rcases hBound with ⟨B, hB⟩
+    have h : B + 1 + 1 ≤ B := hB (B + 1)
+    omega
+  · intro m
+    exact le_rfl
+  · intro n
+    simp [generalizedTotalDOF]
+
 /-- Saturating site cost is eventually constant. -/
 theorem saturatingSiteCost_eventually_constant (K : ℕ) :
     IsEventuallyConstant (saturatingSiteCost K) := by
