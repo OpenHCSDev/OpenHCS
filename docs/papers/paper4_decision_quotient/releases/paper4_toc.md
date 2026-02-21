@@ -16,6 +16,8 @@ We characterize the computational complexity of coordinate sufficiency in decisi
 
 -   **Encoding-regime separation:** Polynomial-time under the explicit-state encoding (polynomial in $|S|$). Under ETH, there exist succinctly encoded worst-case instances witnessed by a strengthened gadget construction (mechanized in Lean; see Appendix [\[app:lean\]](#app:lean){reference-type="ref" reference="app:lean"}) with $k^*=n$ for which SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
+-   **Intermediate query-access obstruction:** In the mechanized Boolean query submodel, the obstruction scale in queried-coordinate size is exponential ($2^{|I|}-1$).
+
 The tractable cases are stated with explicit encoding assumptions (Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}). Together, these results answer the question "when is decision-relevant information identifiable efficiently?" within the stated regimes. At the structural level, the apparent $\exists\forall$ form of MINIMUM-SUFFICIENT-SET collapses to a characterization via the criterion $\text{sufficient}(I) \iff \text{Relevant} \subseteq I$. Within this regime-typed framework, over-modeling is rational only under integrity-preserving attempted-competence-failure conditions; otherwise it is irrational.
 
 The contribution has two levels: (i) a complete complexity landscape for the core decision-relevant problems in the formal model (coNP/$\Sigma_2^P$ completeness and tractable regimes under explicit encoding assumptions), and (ii) a formal regime-typing framework that separates structural complexity from representational hardness and yields theorem-indexed engineering corollaries.
@@ -73,9 +75,11 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 
 -   In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
 
+-   In the intermediate query-access model: the mechanized Boolean query submodel has an exponential obstruction scale in queried-coordinate size ($2^{|I|}-1$; Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}).
+
 -   In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 
-The lower-bound statement does not address intermediate regimes.
+The explicit ETH lower bound is still a succinct worst-case statement; Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} partially fills the intermediate-regime gap by formalizing a query-access obstruction family.
 
 ## Main Theorems
 
@@ -226,6 +230,10 @@ The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and a
 
 The utility is given as a full table over $A \times S$. The input length is $L_{\text{exp}} = \Theta(|A||S|)$ (up to the bitlength of utilities). Polynomial time is measured in $L_{\text{exp}}$. Results stated in terms of $|S|$ use this encoding.
 
+#### Query-access regime (intermediate black-box access).
+
+The solver is given oracle access to decision information at queried states (e.g., $\Opt(s)$, or $U(a,s)$ with $\Opt(s)$ reconstructed from finitely many value queries). Complexity is measured by oracle-query count (optionally paired with per-query evaluation cost). This separates representational access from full-table availability and from succinct-circuit input length.
+
 Unless explicitly stated otherwise, "polynomial time" refers to the succinct encoding.
 
 ## Model Contract and Regime Tags {#sec:model-contract}
@@ -244,9 +252,13 @@ We use short regime tags for applied corollaries:
 
 -   **\[E\]** explicit-state encoding,
 
+-   **\[Q\]** query-access (oracle) regime,
+
 -   **\[S\]** succinct encoding,
 
 -   **\[S+ETH\]** succinct encoding with ETH,
+
+-   **\[Q_bool\]** mechanized Boolean query submodel,
 
 -   **\[S_bool\]** mechanized Boolean-coordinate submodel.
 
@@ -612,11 +624,11 @@ This also clarifies why ANCHOR-SUFFICIENCY remains $\Sigma_2^P$-complete: once a
 
 # Encoding-Regime Separation {#sec:dichotomy}
 
-The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound.
+The hardness results of Section [\[sec:hardness\]](#sec:hardness){reference-type="ref" reference="sec:hardness"} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound, and an intermediate query-access obstruction family.
 
 #### Model note.
 
-Part 1 is \[E\] (time polynomial in $|S|$). Part 2 is \[S+ETH\] (time exponential in $n$). The encodings are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
+Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} has Part 1 in \[E\] (time polynomial in $|S|$) and Part 2 in \[S+ETH\] (time exponential in $n$). Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} is \[Q_bool\] (query-count obstruction scale). These regimes are defined in Section [\[sec:encoding\]](#sec:encoding){reference-type="ref" reference="sec:encoding"} and are not directly comparable as functions of one numeric input-length parameter.
 
 ::: theorem
 []{#thm:dichotomy label="thm:dichotomy"} Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
@@ -650,11 +662,19 @@ There is a clean separation between explicit-state tractability and succinct wor
 For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 :::
 
-::: remark
-Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} keeps the structural problem fixed (same sufficiency relation) and separates representational hardness by encoding regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, while succinct access can hide it enough to force ETH-level worst-case cost on a hard family.
+::: proposition
+[]{#prop:query-regime-obstruction label="prop:query-regime-obstruction"} In the mechanized Boolean query regime \[Q_bool\], the obstruction scale in queried-coordinate size is exponential: $$\exists L_I,\quad L_I = 2^{|I|}-1 \;\wedge\; \big(L_I>0 \iff |I|>0\big).$$ For every nonempty $I$, there exist distinct target patterns that agree outside $I$ and differ on $I$, providing a formalized query-obstruction family at that scale. *(Lean: `queryComplexityLowerBound`, `exponential_query_complexity`, `exists_distinct_patterns`.)*
 :::
 
-This encoding-regime separation identifies exactly where exact minimization is tractable (\[E\]) and where worst-case intractability appears (\[S+ETH\]) for the same underlying decision relation.
+::: proof
+*Proof.* The exact exponential scale is given by `exponential_query_complexity`. The nonempty-coordinate witness family is given by `exists_distinct_patterns` and `queryComplexityLowerBound`, which provide target pairs agreeing outside $I$ but differing on $I$ together with the corresponding nontrivial lower-scale witness. ◻
+:::
+
+::: remark
+Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} and Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, query access yields an exponential obstruction scale in queried-coordinate size, and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
+:::
+
+This regime-typed landscape identifies tractability under \[E\], an intermediate \[Q_bool\] obstruction scale, and worst-case intractability under \[S+ETH\] for the same underlying decision relation.
 
 
 # Tractable Special Cases: When You Can Solve It {#sec:tractable}
@@ -1252,6 +1272,8 @@ This paper establishes the computational complexity of coordinate sufficiency pr
 
 -   An encoding-regime separation contrasts explicit-state polynomial-time (polynomial in $|S|$) with a succinct worst-case ETH lower bound witnessed by a hard family with $k^*=n$ (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"})
 
+-   An intermediate query-access obstruction family is formalized in the Boolean query submodel, with exponential scale $2^{|I|}-1$ in queried-coordinate size (Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"})
+
 -   Tractable subcases exist for explicit-state encoding, separable utility, and tree-structured utility with explicit local factors (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"})
 
 These results place the problem of identifying decision-relevant coordinates at the first and second levels of the polynomial hierarchy.
@@ -1268,7 +1290,7 @@ The results provide precise complexity characterizations within the formal model
 
 2.  **Constructive reductions.** The reductions from TAUTOLOGY and $\exists\forall$-SAT are explicit and machine-checked.
 
-3.  **Encoding-regime separation.** Under the explicit-state encoding, SUFFICIENCY-CHECK is polynomial in $|S|$. Under ETH, there exist succinctly encoded worst-case instances (witnessed by a strengthened gadget family with $k^*=n$) requiring $2^{\Omega(n)}$ time. Intermediate regimes are not ruled out by the lower-bound statement.
+3.  **Encoding-regime separation.** Under \[E\], SUFFICIENCY-CHECK is polynomial in $|S|$. Under \[S+ETH\], there exist succinct worst-case instances (with $k^*=n$) requiring $2^{\Omega(n)}$ time. Under \[Q_bool\], the mechanized obstruction scale is exponential in queried-coordinate size ($2^{|I|}-1$). Other intermediate access models remain open.
 
 ## The Complexity Redistribution Corollary {#the-complexity-redistribution-corollary .unnumbered}
 
@@ -1300,6 +1322,8 @@ The practical corollaries are regime-indexed and theorem-indexed:
 
 -   **\[E\] and structured regimes:** polynomial-time exact procedures exist (Theorem [\[thm:tractable\]](#thm:tractable){reference-type="ref" reference="thm:tractable"}).
 
+-   **\[Q_bool\] query-access obstruction:** queried-coordinate complexity has exponential obstruction scale (Proposition [\[prop:query-regime-obstruction\]](#prop:query-regime-obstruction){reference-type="ref" reference="prop:query-regime-obstruction"}).
+
 -   **\[S+ETH\] hard families:** exact minimization inherits exponential worst-case cost (Theorem [\[thm:dichotomy\]](#thm:dichotomy){reference-type="ref" reference="thm:dichotomy"} together with Theorem [\[thm:sufficiency-conp\]](#thm:sufficiency-conp){reference-type="ref" reference="thm:sufficiency-conp"}).
 
 -   **\[S_bool\] mechanized criterion:** minimization reduces to relevance-cardinality constraints (Corollary [\[cor:practice-diagnostic\]](#cor:practice-diagnostic){reference-type="ref" reference="cor:practice-diagnostic"}).
@@ -1322,6 +1346,8 @@ The Lean formalization establishes:
 2.  **Decision problem definitions:** Formal definitions of sufficiency, optimality, and the decision quotient.
 
 3.  **Economic theorems:** Simplicity Tax redistribution identities and hardness distribution results.
+
+4.  **Query-access obstruction family:** Formalized Boolean query-model constructions and exponential obstruction-scale identities (`queryComplexityLowerBound`, `exponential_query_complexity`).
 
 **Complexity classifications** (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
 
@@ -1435,6 +1461,8 @@ The hardness distribution theorems (Section [\[sec:simplicity-tax\]](#sec:simpl
   `prop:integrity-competence-separation`      Full                 `IntegrityCompetence.competence_implies_integrity`, `IntegrityCompetence.integrity_not_competent_of_nonempty_scope`                                                                                                                                                                                                                                    Direct pair mapping.
 
   `prop:minimal-relevant-equiv`               Full                 `DecisionProblem.minimalSufficient_iff_relevant`, `DecisionProblem.relevantSet_is_minimal`                                                                                                                                                                                                                                                             Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set.
+
+  `prop:query-regime-obstruction`             Full                 `queryComplexityLowerBound`, `exponential_query_complexity`, `exists_distinct_patterns`                                                                                                                                                                                                                                                                Mechanized Boolean query-regime obstruction family and exponential scale identity in $|I|$.
 
   `prop:set-to-selector`                      Full                 `DecisionProblem.sufficient_implies_selectorSufficient`                                                                                                                                                                                                                                                                                                Set-valued sufficiency implies selector-level sufficiency for any deterministic selector.
 

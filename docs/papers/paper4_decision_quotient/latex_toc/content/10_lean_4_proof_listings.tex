@@ -12,6 +12,8 @@ The Lean formalization establishes:
 \item \textbf{Decision problem definitions:} Formal definitions of sufficiency, optimality, and the decision quotient.
 
 \item \textbf{Economic theorems:} Simplicity Tax redistribution identities and hardness distribution results.
+
+\item \textbf{Query-access obstruction family:} Formalized Boolean query-model constructions and exponential obstruction-scale identities (\texttt{queryComplexityLowerBound}, \texttt{exponential\_query\_complexity}).
 \end{enumerate}
 
 \textbf{Complexity classifications} (coNP-completeness, $\Sigma_2^P$-completeness) follow by conditional composition with standard results (e.g., TAUTOLOGY coNP-completeness and $\exists\forall$-SAT $\Sigma_2^P$-completeness), represented explicitly as hypotheses in the conditional transfer theorems listed below. The Lean proofs verify the reduction constructions and the transfer closures under those hypotheses.
@@ -142,6 +144,9 @@ Strict ordering theorem for shared nonempty behavior denominator. \\
 \nolinkurl{prop:minimal-relevant-equiv} & Full &
 \nolinkurl{DecisionProblem.minimalSufficient_iff_relevant}, \nolinkurl{DecisionProblem.relevantSet_is_minimal} &
 Product-space bridge: minimal sufficient sets coincide with the witness-defined relevance set. \\
+\nolinkurl{prop:query-regime-obstruction} & Full &
+\nolinkurl{queryComplexityLowerBound}, \nolinkurl{exponential_query_complexity}, \nolinkurl{exists_distinct_patterns} &
+Mechanized Boolean query-regime obstruction family and exponential scale identity in $|I|$. \\
 \nolinkurl{prop:set-to-selector} & Full &
 \nolinkurl{DecisionProblem.sufficient_implies_selectorSufficient} &
 Set-valued sufficiency implies selector-level sufficiency for any deterministic selector. \\

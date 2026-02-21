@@ -149,6 +149,9 @@ The input length is $L = |A| + \sum_i \log |X_i| + |C_U|$. Polynomial time and a
 \paragraph{Explicit-state encoding (used for enumeration algorithms and experiments).}
 The utility is given as a full table over $A \times S$. The input length is $L_{\text{exp}} = \Theta(|A||S|)$ (up to the bitlength of utilities). Polynomial time is measured in $L_{\text{exp}}$. Results stated in terms of $|S|$ use this encoding.
 
+\paragraph{Query-access regime (intermediate black-box access).}
+The solver is given oracle access to decision information at queried states (e.g., $\Opt(s)$, or $U(a,s)$ with $\Opt(s)$ reconstructed from finitely many value queries). Complexity is measured by oracle-query count (optionally paired with per-query evaluation cost). This separates representational access from full-table availability and from succinct-circuit input length.
+
 Unless explicitly stated otherwise, ``polynomial time'' refers to the succinct encoding.
 
 \subsection{Model Contract and Regime Tags}\label{sec:model-contract}
@@ -164,8 +167,10 @@ All theorem statements in this paper are typed by the following model contract:
 We use short regime tags for applied corollaries:
 \begin{itemize}
 \item \textbf{[E]} explicit-state encoding,
+\item \textbf{[Q]} query-access (oracle) regime,
 \item \textbf{[S]} succinct encoding,
 \item \textbf{[S+ETH]} succinct encoding with ETH,
+\item \textbf{[Q\_bool]} mechanized Boolean query submodel,
 \item \textbf{[S\_bool]} mechanized Boolean-coordinate submodel.
 \end{itemize}
 

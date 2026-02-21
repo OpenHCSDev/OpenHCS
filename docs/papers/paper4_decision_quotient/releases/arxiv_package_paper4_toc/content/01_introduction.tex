@@ -60,10 +60,11 @@ Each condition is stated with its encoding assumption. Outside these regimes, th
 \textbf{When is it intractable?} The general problem is \coNP-complete (Theorem~\ref{thm:sufficiency-conp}), with a separation between explicit-state tractability and succinct worst-case hardness:
 \begin{itemize}
 \item In the explicit-state model: SUFFICIENCY-CHECK is solvable in polynomial time in $|S|$ by explicitly computing $\Opt(s)$ for all $s\in S$ and checking all pairs $(s,s')$ with equal $I$-projection. In particular, instances with $k^* = O(\log |S|)$ are tractable in this model.
+\item In the intermediate query-access model: the mechanized Boolean query submodel has an exponential obstruction scale in queried-coordinate size ($2^{|I|}-1$; Proposition~\ref{prop:query-regime-obstruction}).
 \item In the succinct model: under ETH there exist worst-case instances produced by our strengthened gadget in which the minimal sufficient set has size $\Omega(n)$ (indeed $n$) and SUFFICIENCY-CHECK requires $2^{\Omega(n)}$ time.
 \end{itemize}
 
-The lower-bound statement does not address intermediate regimes.
+The explicit ETH lower bound is still a succinct worst-case statement; Proposition~\ref{prop:query-regime-obstruction} partially fills the intermediate-regime gap by formalizing a query-access obstruction family.
 
 \subsection{Main Theorems}
 

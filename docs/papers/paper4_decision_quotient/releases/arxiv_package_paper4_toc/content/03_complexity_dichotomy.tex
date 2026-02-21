@@ -1,8 +1,8 @@
 \section{Encoding-Regime Separation}\label{sec:dichotomy}
 
-The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound.
+The hardness results of Section~\ref{sec:hardness} apply to worst-case instances under the succinct encoding. This section states an encoding-regime separation: an explicit-state upper bound versus a succinct-encoding worst-case lower bound, and an intermediate query-access obstruction family.
 
-\paragraph{Model note.} Part~1 is [E] (time polynomial in $|S|$). Part~2 is [S+ETH] (time exponential in $n$). The encodings are defined in Section~\ref{sec:encoding}. These two parts are stated in different encodings and are not directly comparable as functions of a single input length.
+\paragraph{Model note.} Theorem~\ref{thm:dichotomy} has Part~1 in [E] (time polynomial in $|S|$) and Part~2 in [S+ETH] (time exponential in $n$). Proposition~\ref{prop:query-regime-obstruction} is [Q\_bool] (query-count obstruction scale). These regimes are defined in Section~\ref{sec:encoding} and are not directly comparable as functions of one numeric input-length parameter.
 
 \begin{theorem}[Explicit--Succinct Regime Separation]\label{thm:dichotomy}
 Let $\mathcal{D} = (A, X_1, \ldots, X_n, U)$ be a decision problem with $|S| = N$ states. Let $k^*$ be the size of the minimal sufficient set.
@@ -36,8 +36,23 @@ There is a clean separation between explicit-state tractability and succinct wor
 For Boolean coordinate spaces ($N = 2^n$), the explicit-state bound is polynomial in $2^n$ (exponential in $n$), while under ETH the succinct lower bound yields $2^{\Omega(n)}$ time for the hard family in which $k^* = \Omega(n)$.
 \end{corollary}
 
+\begin{proposition}[Intermediate Query-Access Obstruction]\label{prop:query-regime-obstruction}
+In the mechanized Boolean query regime [Q\_bool], the obstruction scale in queried-coordinate size is exponential:
+\[
+\exists L_I,\quad L_I = 2^{|I|}-1 \;\wedge\; \big(L_I>0 \iff |I|>0\big).
+\]
+For every nonempty $I$, there exist distinct target patterns that agree outside $I$ and differ on $I$, providing a formalized query-obstruction family at that scale.
+\textit{(Lean: \nolinkurl{queryComplexityLowerBound},
+\nolinkurl{exponential_query_complexity},
+\nolinkurl{exists_distinct_patterns}.)}
+\end{proposition}
+
+\begin{proof}
+The exact exponential scale is given by \texttt{exponential\_query\_complexity}. The nonempty-coordinate witness family is given by \texttt{exists\_distinct\_patterns} and \texttt{queryComplexityLowerBound}, which provide target pairs agreeing outside $I$ but differing on $I$ together with the corresponding nontrivial lower-scale witness.
+\end{proof}
+
 \begin{remark}[Instantiation of Definitions~\ref{def:structural-complexity} and~\ref{def:representational-hardness}]
-Theorem~\ref{thm:dichotomy} keeps the structural problem fixed (same sufficiency relation) and separates representational hardness by encoding regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, while succinct access can hide it enough to force ETH-level worst-case cost on a hard family.
+Theorem~\ref{thm:dichotomy} and Proposition~\ref{prop:query-regime-obstruction} keep the structural problem fixed (same sufficiency relation) and separate representational hardness by access regime: explicit-state access exposes the boundary $s \mapsto \Opt(s)$, query access yields an exponential obstruction scale in queried-coordinate size, and succinct access can hide structure enough to force ETH-level worst-case cost on a hard family.
 \end{remark}
 
-This encoding-regime separation identifies exactly where exact minimization is tractable ([E]) and where worst-case intractability appears ([S+ETH]) for the same underlying decision relation.
+This regime-typed landscape identifies tractability under [E], an intermediate [Q\_bool] obstruction scale, and worst-case intractability under [S+ETH] for the same underlying decision relation.
